@@ -23191,7 +23191,9 @@ Editor = React.createClass({
     return $('div', {
       key: 'root'
     }, [
-      $('h1', {}, 'react2md playground'), $('div', {
+      $('h1', {}, 'md2react playground'), $('a', {
+        href: 'https://github.com/mizchi/md2react'
+      }, "mizchi/md2react"), $('div', {
         key: 'layout',
         style: {
           height: '100%',
