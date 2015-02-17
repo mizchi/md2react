@@ -54,7 +54,8 @@ Editor = React.createClass
 
   render: ->
     $ 'div', {key: 'root'}, [
-      $ 'h1', {}, 'react2md playground'
+      $ 'h1', {}, 'md2react playground'
+      $ 'a', {href:'https://github.com/mizchi/md2react'}, "mizchi/md2react"
       $ 'div', {key: 'layout', style: {height: '100%', width: '100%', display: 'flex'}}, [
         $ 'div', {key: 'editorContainer', style:{width: '50%'}}, [
           $ 'textarea', {
