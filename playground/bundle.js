@@ -68,192 +68,157 @@ process.umask = function() { return 0; };
 
   sanitize = null;
 
-  compile = function(node, key) {
-    var child, dompurify, i, tag;
-    if (key == null) {
-      key = '';
-    }
+  compile = function(node) {
+    var child, dompurify, tag;
     switch (node.type) {
       case 'root':
-        return $('div', {
-          key: key
-        }, (function() {
+        return $('div', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'root' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'text':
         return node.value;
       case 'strong':
-        return $('strong', {
-          key: key
-        }, (function() {
+        return $('strong', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'strong' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'emphasis':
-        return $('em', {
-          key: key
-        }, (function() {
+        return $('em', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'emphasis' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'horizontalRule':
         return $('hr');
       case 'inlineCode':
-        return $('code', {
-          key: key
-        }, [node.value]);
+        return $('code', {}, [node.value]);
       case 'code':
-        return $('code', {
-          key: key
-        }, [node.value]);
+        return $('code', {}, [node.value]);
       case 'heading':
         tag = 'h' + node.depth.toString();
-        return $(tag, {
-          key: key
-        }, (function() {
+        return $(tag, {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, tag + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'paragraph':
-        return $('p', {
-          key: key
-        }, (function() {
+        return $('p', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'paragraph' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'list':
         tag = node.ordered ? 'ol' : 'ul';
-        return $(tag, {
-          key: key
-        }, (function() {
+        return $(tag, {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, tag + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'link':
         return $('a', {
-          key: key,
           href: node.href,
           title: node.title
         }, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'link' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'image':
         return $('img', {
-          key: key,
           src: node.src,
           title: node.title,
           alt: node.alt
         });
       case 'blockquote':
-        return $('blockquote', {
-          key: key
-        }, (function() {
+        return $('blockquote', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'bq' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'table':
-        return $('table', {
-          key: key
-        }, (function() {
+        return $('table', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
       case 'tableHeader':
-        return $('tr', {
-          key: key
-        }, (function() {
+        return $('tr', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push($('th', {
-              key: 'tr-th'
-            }, compile(child, i)));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push($('th', {}, compile(child)));
           }
           return _results;
         })());
       case 'tableRow':
-        return $('tr', {
-          key: key
-        }, (function() {
+        return $('tr', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push($('td', {
-              key: 'td-th'
-            }, compile(child, i)));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push($('td', {}, compile(child)));
           }
           return _results;
         })());
       case 'tableCell':
-        return $('span', {
-          key: key
-        }, (function() {
+        return $('span', {}, (function() {
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
@@ -262,9 +227,9 @@ process.umask = function() { return 0; };
           var _i, _len, _ref, _results;
           _ref = node.children;
           _results = [];
-          for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-            child = _ref[i];
-            _results.push(compile(child, 'li' + i));
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            child = _ref[_i];
+            _results.push(compile(child));
           }
           return _results;
         })());
@@ -272,14 +237,12 @@ process.umask = function() { return 0; };
         if ((typeof window !== "undefined" && window !== null) && sanitize) {
           dompurify = require('dompurify');
           return $('div', {
-            key: key,
             dangerouslySetInnerHTML: {
               __html: dompurify.sanitize(node.value)
             }
           });
         } else {
           return $('div', {
-            key: key,
             dangerouslySetInnerHTML: {
               __html: node.value
             }
