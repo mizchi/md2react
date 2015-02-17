@@ -4,10 +4,7 @@
 npm install --save md2react
 ```
 
-## WIP
-
-- It doesn't work at `table`.
-- Not tested
+This is conceptual implement so not tested well.
 
 ## Example
 
