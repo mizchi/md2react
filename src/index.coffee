@@ -47,7 +47,7 @@ compile = (node) ->
     when 'html'
       $ 'div', dangerouslySetInnerHTML:{__html: node.value}
     else
-      throw 'stop'
+      throw 'Unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
 module.exports = (raw) ->
   ast = mdast.parse raw
