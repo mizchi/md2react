@@ -5,7 +5,7 @@ compile = (node) ->
     when 'root'
       $ 'div', {}, (compile(child) for child in node.children)
     when 'text'
-      node.text
+      node.value
     when 'strong'
       $ 'strong', {}, (compile(child) for child in node.children)
     when 'emphasis'
@@ -36,7 +36,7 @@ compile = (node) ->
       # TODO: fixme
       $ 'table', {}, (compile(child) for child in node.children)
     when 'tableHeader'
-      $ 'tr', {}, (($ 'tr', {}, compile(child)) for child in node.children)
+      $ 'tr', {}, (($ 'th', {}, compile(child)) for child in node.children)
     when 'tableRow'
       $ 'tr', {}, (($ 'td', {}, compile(child)) for child in node.children)
     when 'tableCell'
@@ -47,7 +47,8 @@ compile = (node) ->
     when 'html'
       $ 'div', dangerouslySetInnerHTML:{__html: node.value}
     else
-      throw 'Unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
+      # console.log node
+      throw node.type +' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
 module.exports = (raw) ->
   ast = mdast.parse raw
