@@ -3,6 +3,7 @@
   "version": "0.1.1",
   "description": "",
   "main": "lib/index.js",
+  "keywords": ["react", "markdown", "mdast"],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "coffee -o lib -c src/*",

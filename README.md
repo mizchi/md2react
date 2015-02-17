@@ -4,50 +4,21 @@
 npm install --save md2react
 ```
 
-This is conceptual implement so not tested well.
+See [md2react playground](http://mizchi.github.io/md2react/ "md2react playground")
+
+Not well tested yet.
 
 ## Example
 
-```coffee
-md = '''
-# Hello
-hello
-
-- a
-- b
-
-1. 1
-2. 2
-
-`a`
-
-------
-
-<span></span>
-
-\`\`\`
-bbb
-\`\`\`
-
-**AA**
-
-*BB*
-
-[foo](/foo)
-
-![img](/img.png)
-
-> aaa
-> bbb
-
-
-|  TH  |  TH  |
-| ---- | ---- |
-|  TD  |  TD  |
-|  TD  |  TD  |
-'''
-
+```javascript
 global.React = require('react');
-md2react = require('md2react');
-html = React.renderToString(md2react(md));
+var md2react = require('md2react');
+
+var md = '# Hello';
+var html = React.renderToString(md2react(md));
+//'<div data-reactid=".58nba97pxc" data-react-checksum="-55236619"><h1 data-reactid=".58nba97pxc.0"><span data-reactid=".58nba97pxc.0.0">Hello</span></h1></div>'
 ```
+
+## LICENSE
+
+MIT
