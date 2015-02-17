@@ -30,7 +30,7 @@ bbb
 
 [foo](/foo)
 
-![img](/img.png)
+![image](image.png)
 
 > aaa
 > bbb
@@ -55,17 +55,23 @@ Editor = React.createClass
 
   render: ->
     $ 'div', {key: 'root'}, [
-      $ 'h1', {}, 'md2react playground'
-      $ 'a', {href:'https://github.com/mizchi/md2react'}, "mizchi/md2react"
-      $ 'div', {key: 'layout', style: {height: '100%', width: '100%', display: 'flex'}}, [
-        $ 'div', {key: 'editorContainer', style:{width: '50%'}}, [
+      $ 'h1', {style: {textAlign: 'center', fontFamily: '"Poiret One", cursive', fontSize: '25px', height: '50px', lineHeight: '50px'}}, 'md2react playground'
+      $ 'div', {key: 'layout', style: {
+        height: '80%', width: '80%', margin: '0 10%', display: 'flex', border: '1px solid', borderRadius: '5px', borderColor: '#999'
+      }}, [
+        $ 'div', {key: 'editorContainer', style:{
+          width: '50%', borderRight: '1px solid', borderColor: '#999', overflow: 'hidden'}
+        }, [
           $ 'textarea', {
             ref:'editor'
             onChange: @update
-            style: {height: '100%', width: '100%'}
+            style: {height: '100%', width: '100%', border: 0, outline: 0, fontSize: '14px', padding: '5px', overflow: 'auto', fontFamily:'Consolas, Menlo, monospace', resize: 'none', background: 'transparent'}
           }
         ]
-        $ 'preview',{key:'previewContainer', style: {width: '45%'}}, if @state.content then [@state.content] else ''
+        $ 'preview',{key:'previewContainer', style: {width: '50%', overflow: 'auto', padding: '5px', fontFamily: "'Helvetica Neue', Helvetica"}}, if @state.content then [@state.content] else ''
+      ]
+      $ 'div', {width: '100%', style: {textAlign: 'center', marginTop: '10px'}}, [
+        $ 'a', {href:'https://github.com/mizchi/md2react', style: {fontFamily: 'Helvetica Neue, Helvetica', fontSize: '17px'}}, '[Fork me on GitHub](mizchi/md2react)'
       ]
     ]
 

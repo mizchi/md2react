@@ -22959,7 +22959,7 @@ $ = React.createElement;
 
 defaultMarkdown = '# Hello\n\nbody';
 
-'1. 1\n2. 2\n\n`a`\n\n------\n\n<span></span>\n\n```\nbbb\n```\n\n**AA**\n\n*BB*\n\n[foo](/foo)\n\n![img](/img.png)\n\n> aaa\n> bbb\n\n|  TH  |  TH  |\n| ---- | ---- |\n|  TD  |  TD  |\n|  TD  |  TD  |';
+'1. 1\n2. 2\n\n`a`\n\n------\n\n<span></span>\n\n```\nbbb\n```\n\n**AA**\n\n*BB*\n\n[foo](/foo)\n\n![image](image.png)\n\n> aaa\n> bbb\n\n|  TH  |  TH  |\n| ---- | ---- |\n|  TD  |  TD  |\n|  TD  |  TD  |';
 
 Editor = React.createClass({
   update: function() {
@@ -22984,20 +22984,33 @@ Editor = React.createClass({
     return $('div', {
       key: 'root'
     }, [
-      $('h1', {}, 'md2react playground'), $('a', {
-        href: 'https://github.com/mizchi/md2react'
-      }, "mizchi/md2react"), $('div', {
+      $('h1', {
+        style: {
+          textAlign: 'center',
+          fontFamily: '"Poiret One", cursive',
+          fontSize: '25px',
+          height: '50px',
+          lineHeight: '50px'
+        }
+      }, 'md2react playground'), $('div', {
         key: 'layout',
         style: {
-          height: '100%',
-          width: '100%',
-          display: 'flex'
+          height: '80%',
+          width: '80%',
+          margin: '0 10%',
+          display: 'flex',
+          border: '1px solid',
+          borderRadius: '5px',
+          borderColor: '#999'
         }
       }, [
         $('div', {
           key: 'editorContainer',
           style: {
-            width: '50%'
+            width: '50%',
+            borderRight: '1px solid',
+            borderColor: '#999',
+            overflow: 'hidden'
           }
         }, [
           $('textarea', {
@@ -23005,15 +23018,40 @@ Editor = React.createClass({
             onChange: this.update,
             style: {
               height: '100%',
-              width: '100%'
+              width: '100%',
+              border: 0,
+              outline: 0,
+              fontSize: '14px',
+              padding: '5px',
+              overflow: 'auto',
+              fontFamily: 'Consolas, Menlo, monospace',
+              resize: 'none',
+              background: 'transparent'
             }
           })
         ]), $('preview', {
           key: 'previewContainer',
           style: {
-            width: '45%'
+            width: '50%',
+            overflow: 'auto',
+            padding: '5px',
+            fontFamily: "'Helvetica Neue', Helvetica"
           }
         }, this.state.content ? [this.state.content] : '')
+      ]), $('div', {
+        width: '100%',
+        style: {
+          textAlign: 'center',
+          marginTop: '10px'
+        }
+      }, [
+        $('a', {
+          href: 'https://github.com/mizchi/md2react',
+          style: {
+            fontFamily: 'Helvetica Neue, Helvetica',
+            fontSize: '17px'
+          }
+        }, '[Fork me on GitHub](mizchi/md2react)')
       ])
     ]);
   }
