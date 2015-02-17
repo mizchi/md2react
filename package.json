@@ -4,14 +4,18 @@
   "description": "",
   "main": "lib/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "coffee -o lib -c src/*",
+    "build-playground": "browserify -t coffeeify --extension='.coffee' playground/index.coffee -o playground/bundle.js"
   },
   "author": "mizchi",
   "license": "MIT",
   "devDependencies": {
+    "coffeeify": "^1.0.0",
     "react": "^0.12.2"
   },
   "dependencies": {
+    "dompurify": "^0.6.0",
     "mdast": "^0.4.1"
   }
 }
