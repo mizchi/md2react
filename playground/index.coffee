@@ -1,15 +1,16 @@
 global.React = require('react')
-md2react = require('../lib/index')
+md2react = require('../src/index')
 
 $ = React.createElement
 
 defaultMarkdown = '''
 # Hello
-hello
 
-- a
-- b
+body
+'''
 
+
+'''
 1. 1
 2. 2
 
@@ -34,12 +35,12 @@ bbb
 > aaa
 > bbb
 
-
 |  TH  |  TH  |
 | ---- | ---- |
 |  TD  |  TD  |
 |  TD  |  TD  |
 '''
+
 Editor = React.createClass
   update: ->
     editor = @refs.editor.getDOMNode()

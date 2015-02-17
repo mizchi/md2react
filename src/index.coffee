@@ -4,53 +4,53 @@ sanitize = null
 compile = (node, key='') ->
   switch node.type
     when 'root'
-      $ 'div', {key: key}, (compile(child, 'root'+i) for child, i in node.children)
+      $ 'div', {key: key+'root'}, (compile(child, key+'root'+i) for child, i in node.children)
     when 'text'
       node.value
     when 'strong'
-      $ 'strong', {key: key}, (compile(child, 'strong'+i) for child, i in node.children)
+      $ 'strong', {key: key+'strong'}, (compile(child, key+'strong'+i) for child, i in node.children)
     when 'emphasis'
-      $ 'em', {key: key}, (compile(child, 'emphasis'+i) for child, i in node.children)
+      $ 'em', {key: key+'emphasis'}, (compile(child, key+'emphasis'+i) for child, i in node.children)
     when 'horizontalRule'
-      $ 'hr'
+      $ 'hr', key: key+'hr'
     when 'inlineCode'
       # TODO: code is valide?
-      $ 'code', {key: key}, [node.value]
+      $ 'code', {key: key+'inlineCode'}, node.value
     when 'code'
       # TODO: code is valide?
-      $ 'code', {key: key}, [node.value]
+      $ 'code', {key: key+'code'}, node.value
     when 'heading'
       tag = 'h'+node.depth.toString()
-      $ tag, {key: key}, (compile(child, tag+i) for child, i in node.children)
+      $ tag, {key: key+tag}, (compile(child, key+tag+i) for child, i in node.children)
     when 'paragraph'
-      $ 'p', {key: key}, (compile(child, 'paragraph'+i) for child, i in node.children)
+      $ 'p', {key: key+'paragraph'}, (compile(child, key+'paragraph'+i) for child, i in node.children)
     when 'list'
       tag = if node.ordered then 'ol' else 'ul'
-      $ tag, {key: key}, (compile(child, tag+i) for child, i in node.children)
+      $ tag, {key: key+'list'}, (compile(child, key+tag+i) for child, i in node.children)
     when 'link'
-      $ 'a', {key: key, href: node.href, title: node.title}, (compile(child, 'link'+i) for child, i in node.children)
+      $ 'a', {key: key+'link', href: node.href, title: node.title}, (compile(child, key+'link'+i) for child, i in node.children)
     when 'image'
-      $ 'img', {key: key, src: node.src, title: node.title, alt: node.alt}
+      $ 'img', {key: key+'image', src: node.src, title: node.title, alt: node.alt}
     when 'blockquote'
-      $ 'blockquote', {key: key}, (compile(child, 'bq'+i) for child, i in node.children)
+      $ 'blockquote', {key: key+'bq'}, (compile(child, key+'bq'+i) for child, i in node.children)
     when 'table'
       # TODO: fixme
-      $ 'table', {key: key}, (compile(child, i) for child, i in node.children)
+      $ 'table', {key: key+'table'}, (compile(child, key+'table'+i) for child, i in node.children)
     when 'tableHeader'
-      $ 'tr', {key: key}, (($ 'th', {key: 'tr-th'}, compile(child, i)) for child, i in node.children)
+      $ 'tr', {key: key+'tableHeader'}, (($ 'th', {key: key+'tr-th'}, compile(child, key+'tableHeader'+i)) for child, i in node.children)
     when 'tableRow'
-      $ 'tr', {key: key}, (($ 'td', {key: 'td-th'}, compile(child, i)) for child, i in node.children)
+      $ 'tr', {key: key+'tableRow'}, (($ 'td', {key: key+'td-th'}, compile(child, key+'tableRow'+i)) for child, i in node.children)
     when 'tableCell'
-      $ 'span', {key: key}, (compile(child, i) for child, i in node.children)
+      $ 'span', {key: key+'tableCell'}, (compile(child, key+'tableCell'+i) for child, i in node.children)
     when 'listItem'
       # TODO: what is loose property?
-      $ 'li', {}, (compile(child, 'li'+i) for child, i in node.children)
+      $ 'li', {key: key+'li'}, (compile(child, key+'li'+i) for child, i in node.children)
     when 'html'
       if window? and sanitize
         dompurify = require 'dompurify'
-        $ 'div', key: key, dangerouslySetInnerHTML:{__html: dompurify.sanitize(node.value)}
+        $ 'div', key: key+'html', dangerouslySetInnerHTML:{__html: dompurify.sanitize(node.value)}
       else
-        $ 'div', key: key, dangerouslySetInnerHTML:{__html: node.value}
+        $ 'div', key: key+'html', dangerouslySetInnerHTML:{__html: node.value}
     else
       # console.log node
       throw node.type +' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
@@ -58,4 +58,4 @@ compile = (node, key='') ->
 module.exports = (raw, _sanitize = true) ->
   sanitize = _sanitize
   ast = mdast.parse raw
-  compile(ast)
+  compile(ast, '__entry')
