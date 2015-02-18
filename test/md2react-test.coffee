@@ -2,6 +2,11 @@ global.React = require 'react'
 md2react = require '../src/index'
 
 md = '''
+# foo
+hello
+'''
+
+'''
 # Hello
 hello
 
@@ -48,4 +53,5 @@ bbb
 element = md2react md, gfm: true, breaks: true
 # element = md2react md
 
+# console.log React.renderToStaticMarkup element
 console.log React.renderToString element

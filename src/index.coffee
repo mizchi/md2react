@@ -38,16 +38,15 @@ compile = (node, parentKey='_start') ->
 
     # Raw html
     when 'html'
-      # TODO: It cause violation
-      if document? and sanitize
-        dompurify = require 'dompurify' # it fire error in node on require
-        $ 'div', className: 'rawContainer', [
-          $ 'div', {key, dangerouslySetInnerHTML:{__html: dompurify.sanitize(node.value)}}
-        ]
-      else
-        $ 'div', className: 'rawContainer', [
-          $ 'div', {key, dangerouslySetInnerHTML:{__html: node.value}}
-        ]
+      value =
+        if document? and sanitize
+          dompurify = require 'dompurify' # it fire error in node on require
+          dompurify.sanitize(node.value)
+        else
+          node.value
+      $ 'div', {key}, [
+        $ 'div', {key: key+'_raw', dangerouslySetInnerHTML:{__html: value}}
+      ]
     else
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
