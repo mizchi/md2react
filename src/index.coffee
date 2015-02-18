@@ -16,10 +16,10 @@ compile = (node, key='') ->
     when 'break'
       $ 'br', key: key+'break'
     when 'inlineCode'
-      # TODO: code is valide?
+      # TODO: code is valid?
       $ 'code', {key: key+'inlineCode'}, node.value
     when 'code'
-      # TODO: code is valide?
+      # TODO: code is valid?
       $ 'code', {key: key+'code'}, node.value
     when 'heading'
       tag = 'h'+node.depth.toString()
