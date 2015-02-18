@@ -22957,16 +22957,17 @@ md2react = require('../src/index');
 
 $ = React.createElement;
 
-defaultMarkdown = '# Hello\n\nbody';
-
-'1. 1\n2. 2\n\n`a`\n\n------\n\n<span></span>\n\n```\nbbb\n```\n\n**AA**\n\n*BB*\n\n[foo](/foo)\n\n![image](image.png)\n\n> aaa\n> bbb\n\n|  TH  |  TH  |\n| ---- | ---- |\n|  TD  |  TD  |\n|  TD  |  TD  |';
+defaultMarkdown = '# Hello\n\nbody\n\n1. 1\n2. 2\n\n`a`\n\n------\n\n```\nbbb\n```\n\n**AA**\n\n*BB*\n\n[foo](/foo)\n\n![image](image.png)\n\n> aaa\n> bbb\n\n|  TH  |  TH  |\n| ---- | ---- |\n|  TD  |  TD  |\n|  TD  |  TD  |';
 
 Editor = React.createClass({
   update: function() {
     var editor;
     editor = this.refs.editor.getDOMNode();
     return this.setState({
-      content: md2react(editor.value)
+      content: md2react(editor.value, {
+        gfm: true,
+        breaks: true
+      })
     });
   },
   componentDidMount: function() {
@@ -23065,249 +23066,163 @@ window.addEventListener('DOMContentLoaded', function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"../src/index":160,"react":158}],160:[function(require,module,exports){
-var $, compile, mdast, sanitize;
+var $, compile, mdast, sanitize, toChildren;
 
 mdast = require('mdast');
 
 $ = React.createElement;
 
+toChildren = function(node, parentKey) {
+  var child, i;
+  return (function() {
+    var _i, _len, _ref, _results;
+    _ref = node.children;
+    _results = [];
+    for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
+      child = _ref[i];
+      _results.push(compile(child, parentKey + '_' + i));
+    }
+    return _results;
+  })();
+};
+
 sanitize = null;
 
-compile = function(node, key) {
-  var child, dompurify, i, tag;
-  if (key == null) {
-    key = '';
+compile = function(node, parentKey) {
+  var dompurify, key;
+  if (parentKey == null) {
+    parentKey = '_start';
   }
+  key = parentKey + '_' + node.type;
   switch (node.type) {
-    case 'root':
-      return $('div', {
-        key: key + 'root'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'root' + i));
-        }
-        return _results;
-      })());
     case 'text':
       return node.value;
-    case 'strong':
-      return $('strong', {
-        key: key + 'strong'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'strong' + i));
-        }
-        return _results;
-      })());
-    case 'emphasis':
-      return $('em', {
-        key: key + 'emphasis'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'emphasis' + i));
-        }
-        return _results;
-      })());
-    case 'horizontalRule':
-      return $('hr', {
-        key: key + 'hr'
-      });
     case 'inlineCode':
       return $('code', {
-        key: key + 'inlineCode'
+        key: key,
+        className: 'inlineCode'
       }, node.value);
     case 'code':
       return $('code', {
-        key: key + 'code'
+        key: key,
+        className: 'code'
       }, node.value);
-    case 'heading':
-      tag = 'h' + node.depth.toString();
-      return $(tag, {
-        key: key + tag
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + tag + i));
-        }
-        return _results;
-      })());
-    case 'paragraph':
-      return $('p', {
-        key: key + 'paragraph'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'paragraph' + i));
-        }
-        return _results;
-      })());
-    case 'list':
-      tag = node.ordered ? 'ol' : 'ul';
-      return $(tag, {
-        key: key + 'list'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + tag + i));
-        }
-        return _results;
-      })());
-    case 'link':
-      return $('a', {
-        key: key + 'link',
-        href: node.href,
-        title: node.title
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'link' + i));
-        }
-        return _results;
-      })());
+    case 'break':
+      return $('br', {
+        key: key
+      });
+    case 'horizontalRule':
+      return $('hr', {
+        key: key
+      });
     case 'image':
       return $('img', {
-        key: key + 'image',
+        key: key,
         src: node.src,
         title: node.title,
         alt: node.alt
       });
-    case 'blockquote':
-      return $('blockquote', {
-        key: key + 'bq'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'bq' + i));
-        }
-        return _results;
-      })());
-    case 'table':
-      return $('table', {
-        key: key + 'table'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'table' + i));
-        }
-        return _results;
-      })());
-    case 'tableHeader':
-      return $('tr', {
-        key: key + 'tableHeader'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push($('th', {
-            key: key + 'tr-th'
-          }, compile(child, key + 'tableHeader' + i)));
-        }
-        return _results;
-      })());
-    case 'tableRow':
-      return $('tr', {
-        key: key + 'tableRow'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push($('td', {
-            key: key + 'td-th'
-          }, compile(child, key + 'tableRow' + i)));
-        }
-        return _results;
-      })());
-    case 'tableCell':
-      return $('span', {
-        key: key + 'tableCell'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'tableCell' + i));
-        }
-        return _results;
-      })());
+    case 'root':
+      return $('div', {
+        key: key
+      }, toChildren(node, key));
+    case 'strong':
+      return $('strong', {
+        key: key
+      }, toChildren(node, key));
+    case 'emphasis':
+      return $('em', {
+        key: key
+      }, toChildren(node, key));
+    case 'paragraph':
+      return $('p', {
+        key: key
+      }, toChildren(node, key));
+    case 'link':
+      return $('a', {
+        key: key,
+        href: node.href,
+        title: node.title
+      }, toChildren(node, key));
+    case 'heading':
+      return $('h' + node.depth.toString(), {
+        key: key
+      }, toChildren(node, key));
+    case 'list':
+      return $((node.ordered ? 'ol' : 'ul'), {
+        key: key
+      }, toChildren(node, key));
     case 'listItem':
       return $('li', {
-        key: key + 'li'
-      }, (function() {
-        var _i, _len, _ref, _results;
-        _ref = node.children;
-        _results = [];
-        for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-          child = _ref[i];
-          _results.push(compile(child, key + 'li' + i));
-        }
-        return _results;
-      })());
+        key: key
+      }, toChildren(node, key));
+    case 'blockquote':
+      return $('blockquote', {
+        key: key
+      }, toChildren(node, key));
+    case 'table':
+      return $('table', {
+        key: key
+      }, toChildren(node, key));
+    case 'tableHeader':
+      return $('tr', {
+        key: key
+      }, [
+        $('th', {
+          key: key + '_inner-th'
+        }, toChildren(node, key))
+      ]);
+    case 'tableRow':
+      return $('tr', {
+        key: key
+      }, [
+        $('td', {
+          key: key + '_inner-td'
+        }, toChildren(node, key))
+      ]);
+    case 'tableCell':
+      return $('span', {
+        key: key
+      }, toChildren(node, key));
     case 'html':
-      if ((typeof window !== "undefined" && window !== null) && sanitize) {
+      if ((typeof document !== "undefined" && document !== null) && sanitize) {
         dompurify = require('dompurify');
         return $('div', {
-          key: key + 'html',
-          dangerouslySetInnerHTML: {
-            __html: dompurify.sanitize(node.value)
-          }
-        });
+          className: 'rawContainer'
+        }, [
+          $('div', {
+            key: key,
+            dangerouslySetInnerHTML: {
+              __html: dompurify.sanitize(node.value)
+            }
+          })
+        ]);
       } else {
         return $('div', {
-          key: key + 'html',
-          dangerouslySetInnerHTML: {
-            __html: node.value
-          }
-        });
+          className: 'rawContainer'
+        }, [
+          $('div', {
+            key: key,
+            dangerouslySetInnerHTML: {
+              __html: node.value
+            }
+          })
+        ]);
       }
       break;
     default:
-      throw node.type(+' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues');
+      throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues';
   }
 };
 
-module.exports = function(raw, _sanitize) {
-  var ast;
-  if (_sanitize == null) {
-    _sanitize = true;
+module.exports = function(raw, options) {
+  var ast, _ref;
+  if (options == null) {
+    options = {};
   }
-  sanitize = _sanitize;
-  ast = mdast.parse(raw);
-  return compile(ast, '__entry');
+  sanitize = (_ref = options.sanitize) != null ? _ref : true;
+  ast = mdast.parse(raw, options);
+  return compile(ast);
 };
 
 
