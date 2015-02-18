@@ -4,6 +4,7 @@ $ = React.createElement
 toChildren = (node, parentKey) ->
   return (for child, i in node.children
     compile(child, parentKey+'_'+i))
+
 sanitize = null
 compile = (node, parentKey='_start') ->
   key = parentKey+'_'+node.type
@@ -11,8 +12,8 @@ compile = (node, parentKey='_start') ->
     # No children nodes
     ## Has node.value
     when 'text'           then node.value
-    when 'inlineCode'     then $ 'code', {key}, node.value
-    when 'code'           then $ 'code', {key}, node.value
+    when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
+    when 'code'           then $ 'code', {key, className:'code'}, node.value # TODO: fix to block
     when 'break'          then $ 'br', {key}
     when 'horizontalRule' then $ 'hr', {key}
     when 'image'          then $ 'img', {key, src: node.src, title: node.title, alt: node.alt}
@@ -37,11 +38,16 @@ compile = (node, parentKey='_start') ->
 
     # Raw html
     when 'html'
+      # TODO: It cause violation
       if document? and sanitize
         dompurify = require 'dompurify' # it fire error in node on require
-        $ 'div', {key, dangerouslySetInnerHTML:{__html: dompurify.sanitize(node.value)}}
+        $ 'div', className: 'rawContainer', [
+          $ 'div', {key, dangerouslySetInnerHTML:{__html: dompurify.sanitize(node.value)}}
+        ]
       else
-        $ 'div', {key, dangerouslySetInnerHTML:{__html: node.value}}
+        $ 'div', className: 'rawContainer', [
+          $ 'div', {key, dangerouslySetInnerHTML:{__html: node.value}}
+        ]
     else
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
