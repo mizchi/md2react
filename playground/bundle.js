@@ -23089,7 +23089,7 @@ toChildren = function(node, parentKey) {
 sanitize = null;
 
 compile = function(node, parentKey) {
-  var dompurify, key;
+  var dompurify, key, value;
   if (parentKey == null) {
     parentKey = '_start';
   }
@@ -23185,31 +23185,17 @@ compile = function(node, parentKey) {
         key: key
       }, toChildren(node, key));
     case 'html':
-      if ((typeof document !== "undefined" && document !== null) && sanitize) {
-        dompurify = require('dompurify');
-        return $('div', {
-          className: 'rawContainer'
-        }, [
-          $('div', {
-            key: key,
-            dangerouslySetInnerHTML: {
-              __html: dompurify.sanitize(node.value)
-            }
-          })
-        ]);
-      } else {
-        return $('div', {
-          className: 'rawContainer'
-        }, [
-          $('div', {
-            key: key,
-            dangerouslySetInnerHTML: {
-              __html: node.value
-            }
-          })
-        ]);
-      }
-      break;
+      value = (typeof document !== "undefined" && document !== null) && sanitize ? (dompurify = require('dompurify'), dompurify.sanitize(node.value)) : node.value;
+      return $('div', {
+        key: key
+      }, [
+        $('div', {
+          key: key + '_raw',
+          dangerouslySetInnerHTML: {
+            __html: value
+          }
+        })
+      ]);
     default:
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues';
   }
