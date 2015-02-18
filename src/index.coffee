@@ -1,6 +1,5 @@
 mdast = require 'mdast'
 $ = React.createElement
-sanitize = null
 compile = (node, key='') ->
   switch node.type
     when 'root'
@@ -48,13 +47,12 @@ compile = (node, key='') ->
       # TODO: what is loose property?
       $ 'li', {key: key+'li'}, (compile(child, key+'li'+i) for child, i in node.children)
     when 'html'
-      if window? and sanitize
-        dompurify = require 'dompurify'
+      if document? and sanitize
+        dompurify = require 'dompurify' # it fire error in node on require
         $ 'div', key: key+'html', dangerouslySetInnerHTML:{__html: dompurify.sanitize(node.value)}
       else
         $ 'div', key: key+'html', dangerouslySetInnerHTML:{__html: node.value}
     else
-      # console.log node
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
 module.exports = (raw, options = {}) ->

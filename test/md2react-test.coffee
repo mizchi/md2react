@@ -37,6 +37,12 @@ bbb
 | ---- | ---- |
 |  TD  |  TD  |
 |  TD  |  TD  |
+
+-
+  loose
+
+- item
+
 '''
 
 element = md2react md, gfm: true, breaks: true
