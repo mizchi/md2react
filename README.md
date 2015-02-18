@@ -8,6 +8,11 @@ See [md2react playground](http://mizchi.github.io/md2react/ "md2react playground
 
 Not well tested yet.
 
+## TODO
+
+- Raw html causes react violation in dangerouslySetInnerHTML
+- Tests
+
 ## Example
 
 ```javascript
