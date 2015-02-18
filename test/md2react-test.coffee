@@ -39,6 +39,7 @@ bbb
 |  TD  |  TD  |
 '''
 
-element = md2react md
+element = md2react md, gfm: true, breaks: true
+# element = md2react md
 
 console.log React.renderToString element

@@ -13,6 +13,8 @@ compile = (node, key='') ->
       $ 'em', {key: key+'emphasis'}, (compile(child, key+'emphasis'+i) for child, i in node.children)
     when 'horizontalRule'
       $ 'hr', key: key+'hr'
+    when 'break'
+      $ 'br', key: key+'break'
     when 'inlineCode'
       # TODO: code is valide?
       $ 'code', {key: key+'inlineCode'}, node.value
@@ -53,9 +55,9 @@ compile = (node, key='') ->
         $ 'div', key: key+'html', dangerouslySetInnerHTML:{__html: node.value}
     else
       # console.log node
-      throw node.type +' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
+      throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
-module.exports = (raw, _sanitize = true) ->
-  sanitize = _sanitize
-  ast = mdast.parse raw
+module.exports = (raw, options = {}) ->
+  sanitize = options.sanitize ? true
+  ast = mdast.parse raw, options
   compile(ast, '__entry')
