@@ -4,7 +4,7 @@ $ = React.createElement
 toChildren = (node, parentKey) ->
   return (for child, i in node.children
     compile(child, parentKey+'_'+i))
-
+sanitize = null
 compile = (node, parentKey='_start') ->
   key = parentKey+'_'+node.type
   switch node.type
