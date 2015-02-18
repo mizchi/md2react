@@ -7,18 +7,13 @@ defaultMarkdown = '''
 # Hello
 
 body
-'''
 
-
-'''
 1. 1
 2. 2
 
 `a`
 
 ------
-
-<span></span>
 
 ```
 bbb
@@ -44,7 +39,7 @@ bbb
 Editor = React.createClass
   update: ->
     editor = @refs.editor.getDOMNode()
-    @setState content: md2react editor.value
+    @setState content: md2react editor.value, gfm: true, breaks: true
 
   componentDidMount: ->
     editor = @refs.editor.getDOMNode()
