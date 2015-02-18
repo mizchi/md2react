@@ -9,11 +9,10 @@ sanitize = null
 compile = (node, parentKey='_start') ->
   key = parentKey+'_'+node.type
   switch node.type
-    # No children nodes
-    ## Has node.value
+    # No child
     when 'text'           then node.value
     when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
-    when 'code'           then $ 'code', {key, className:'code'}, node.value # TODO: fix to block
+    when 'code'           then $ 'code', {key, className:'code'}, node.value
     when 'break'          then $ 'br', {key}
     when 'horizontalRule' then $ 'hr', {key}
     when 'image'          then $ 'img', {key, src: node.src, title: node.title, alt: node.alt}
@@ -30,7 +29,6 @@ compile = (node, parentKey='_start') ->
     when 'blockquote' then $ 'blockquote', {key}, toChildren(node, key)
 
     # Table
-    # TODO: table may be bugged
     when 'table'       then $ 'table', {key}, toChildren(node, key)
     when 'tableHeader' then $ 'tr', {key}  , [$ 'th', {key: key+'_inner-th'}, toChildren(node, key)]
     when 'tableRow'    then $ 'tr', {key}  , [$ 'td', {key: key+'_inner-td'}, toChildren(node, key)]
