@@ -39,7 +39,11 @@ bbb
 Editor = React.createClass
   update: ->
     editor = @refs.editor.getDOMNode()
-    @setState content: md2react editor.value, gfm: true, breaks: true
+    try
+      content = md2react editor.value, gfm: true, breaks: true
+      @setState content: content
+    catch e
+      console.warn 'markdown parse error'
 
   componentDidMount: ->
     editor = @refs.editor.getDOMNode()
