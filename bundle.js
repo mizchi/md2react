@@ -22961,14 +22961,20 @@ defaultMarkdown = '# Hello\n\nbody\n\n1. 1\n2. 2\n\n`a`\n\n------\n\n```\nbbb\n`
 
 Editor = React.createClass({
   update: function() {
-    var editor;
+    var content, e, editor;
     editor = this.refs.editor.getDOMNode();
-    return this.setState({
-      content: md2react(editor.value, {
+    try {
+      content = md2react(editor.value, {
         gfm: true,
         breaks: true
-      })
-    });
+      });
+      return this.setState({
+        content: content
+      });
+    } catch (_error) {
+      e = _error;
+      return console.log('markdown parse error');
+    }
   },
   componentDidMount: function() {
     var editor;
