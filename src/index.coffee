@@ -25,7 +25,15 @@ compile = (node, parentKey='_start') ->
     when 'link'       then $ 'a', {key, href: node.href, title: node.title}, toChildren(node, key)
     when 'heading'    then $ ('h'+node.depth.toString()), {key}, toChildren(node, key)
     when 'list'       then $ (if node.ordered then 'ol' else 'ul'), {key}, toChildren(node, key)
-    when 'listItem'   then $ 'li', {key}, toChildren(node, key)
+    when 'listItem'
+      className =
+        if node.checked is true
+          'checked'
+        else if node.checked is false
+          'unchecked'
+        else
+          ''
+      $ 'li', {key, className}, toChildren(node, key)
     when 'blockquote' then $ 'blockquote', {key}, toChildren(node, key)
 
     # Table

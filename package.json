@@ -22,6 +22,6 @@
   },
   "dependencies": {
     "dompurify": "^0.6.0",
-    "mdast": "^0.5.2"
+    "mdast": "mizchi/mdast#7fa74f9bbfeb51bdb24d1106ae319ce2fd008357"
   }
 }

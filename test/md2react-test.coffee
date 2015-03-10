@@ -13,12 +13,21 @@ hello
 - a
 - b
 
+-------
+
 1. 1
 2. 2
 
-`a`
+-------
+
+- [x] a
+- [ ] b
+- c
 
 ------
+
+`a`
+
 
 <span></span>
 
@@ -50,7 +59,7 @@ bbb
 
 '''
 
-element = md2react md, gfm: true, breaks: true
+element = md2react md, gfm: true, breaks: true, tasklist: true
 # element = md2react md
 
 # console.log React.renderToStaticMarkup element
