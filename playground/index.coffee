@@ -55,9 +55,7 @@ Editor = React.createClass
   render: ->
     $ 'div', {key: 'root'}, [
       $ 'h1', {style: {textAlign: 'center', fontFamily: '"Poiret One", cursive', fontSize: '25px', height: '50px', lineHeight: '50px'}}, 'md2react playground'
-      $ 'div', {key: 'layout', style: {
-        height: '80%', width: '80%', margin: '0 10%', display: 'flex', border: '1px solid', borderRadius: '5px', borderColor: '#999'
-      }}, [
+      $ 'div', {key: 'layout', className: 'flex'}, [
         $ 'div', {key: 'editorContainer', style:{
           width: '50%', borderRight: '1px solid', borderColor: '#999', overflow: 'hidden'}
         }, [
