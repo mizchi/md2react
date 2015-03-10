@@ -30,7 +30,7 @@ var md = '- [x] a\n- [ ] b\n- c';
 var html = React.renderToString(md2react(md));
 
 ```html
-<div><ul><li class="checked"><p>[x] a</p></li><li class="unchecked"><p>[ ] b</p></li><li class=""><p>c</p></li></ul></div>
+<div><ul><li class="checked"><p>a</p></li><li class="unchecked"><p>b</p></li><li class=""><p>c</p></li></ul></div>
 ```
 
 ## API
