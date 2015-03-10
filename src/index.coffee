@@ -8,6 +8,10 @@ toChildren = (node, parentKey) ->
 sanitize = null
 compile = (node, parentKey='_start') ->
   key = parentKey+'_'+node.type
+
+  # TODO: fix in mdast
+  if node.value?
+    node.value = node.value.replace /^(\[(x|\s)\])/, ''
   switch node.type
     # No child
     when 'text'           then node.value
