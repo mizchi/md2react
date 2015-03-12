@@ -1,0 +1,12 @@
+.flex {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  height: 80%;
+  width: 80%;
+  margin: 0 10%;
+  border: 1px solid;
+  borderRadius: 5px;
+  borderColor: #999;
+}
