@@ -25,6 +25,7 @@ compile = (node, parentKey='_start') ->
     when 'root'       then $ 'div', {key}, toChildren(node, key)
     when 'strong'     then $ 'strong', {key}, toChildren(node, key)
     when 'emphasis'   then $ 'em', {key}, toChildren(node, key)
+    when 'delete'     then $ 's', {key}, toChildren(node, key)
     when 'paragraph'  then $ 'p', {key}, toChildren(node, key)
     when 'link'       then $ 'a', {key, href: node.href, title: node.title}, toChildren(node, key)
     when 'heading'    then $ ('h'+node.depth.toString()), {key}, toChildren(node, key)
