@@ -8,6 +8,12 @@ hello
 - a
 - b
 
+----
+
+- [ ] unchecked
+- [x] checked
+- plain
+
 -------
 
 1. 1

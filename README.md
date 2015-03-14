@@ -21,17 +21,19 @@ var html = React.renderToString(md2react(md));
 */
 ```
 
-## Checklist(Exprerimental)
+## Checklist
 
-(wip) Add checked/unchecked class
+Compiled elements are given checked/unchecked class if bullet has checkbox.
 
 ```javascript
 var md = '- [x] a\n- [ ] b\n- c';
-var html = React.renderToString(md2react(md));
+var html = React.renderToString(md2react(md, tasklist: true));
 
 ```html
 <div><ul><li class="checked"><p>a</p></li><li class="unchecked"><p>b</p></li><li class=""><p>c</p></li></ul></div>
 ```
+
+Write your checklist style
 
 ## API
 

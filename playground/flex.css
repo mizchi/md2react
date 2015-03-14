@@ -10,3 +10,11 @@
   borderRadius: 5px;
   borderColor: #999;
 }
+
+.previewContainer li.checked:before {
+  content: '☑';
+}
+
+.previewContainer li.unchecked:before {
+  content: '□';
+}

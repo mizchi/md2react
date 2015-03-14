@@ -11,6 +11,12 @@ body
 1. 1
 2. 2
 
+------
+
+- [ ] unchecked
+- [x] checked
+- foo
+
 `a`
 
 ------
@@ -25,7 +31,7 @@ bbb
 
 [foo](/foo)
 
-![image](image.png)
+![image](http://placehold.it/20x20/27709b/ffffff)
 
 > aaa
 > bbb
@@ -65,7 +71,16 @@ Editor = React.createClass
             style: {height: '100%', width: '100%', border: 0, outline: 0, fontSize: '14px', padding: '5px', overflow: 'auto', fontFamily:'Consolas, Menlo, monospace', resize: 'none', background: 'transparent'}
           }
         ]
-        $ 'preview',{key:'previewContainer', style: {width: '50%', overflow: 'auto', padding: '5px', fontFamily: "'Helvetica Neue', Helvetica"}}, if @state.content then [@state.content] else ''
+        $ 'div',{
+          className: 'previewContainer',
+          key: 'previewContainer',
+          style: {
+            width: '50%'
+            overflow: 'auto'
+            padding: '5px'
+            fontFamily: "'Helvetica Neue', Helvetica"
+          }
+        }, if @state.content then [@state.content] else ''
       ]
       $ 'div', {width: '100%', style: {textAlign: 'center', marginTop: '10px'}}, [
         $ 'a', {href:'https://github.com/mizchi/md2react', style: {fontFamily: 'Helvetica Neue, Helvetica', fontSize: '17px'}}, '[Fork me on GitHub](mizchi/md2react)'
