@@ -12,6 +12,7 @@ compile = (node, parentKey='_start') ->
   switch node.type
     # No child
     when 'text'           then node.value
+    when 'escape'         then '\\'
     when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
     when 'code'           then $ 'code', {key, className:'code'}, node.value
     when 'break'          then $ 'br', {key}
