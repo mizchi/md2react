@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "coffee -o lib -c src/*",
+    "prepublish": "coffee -o lib -c src/*",
     "build-playground": "browserify -t coffeeify --extension='.coffee' playground/index.coffee -o playground/bundle.js"
   },
   "author": "mizchi",
