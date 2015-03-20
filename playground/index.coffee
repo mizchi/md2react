@@ -42,11 +42,21 @@ bbb
 |  TD  |  TD  |
 '''
 
+defaultMarkdown = '''
+|パターン|説明|
+|:--|:--|
+|パターン1|View オブジェクトを宣言したときに Model がインスタンス化される|
+|パターン2|View オブジェクトがインスタンス化されるときに Model もインスタンス化される|
+'''
+
 Editor = React.createClass
   update: ->
     editor = @refs.editor.getDOMNode()
     try
-      content = md2react editor.value, gfm: true, breaks: true
+      content = md2react editor.value,
+        gfm: true
+        breaks: true
+        tables: true
       @setState content: content
     catch e
       console.warn 'markdown parse error'
