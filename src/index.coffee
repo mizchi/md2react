@@ -41,8 +41,20 @@ compile = (node, parentKey='_start') ->
 
     # Table
     when 'table'       then $ 'table', {key}, toChildren(node, key)
-    when 'tableHeader' then $ 'tr', {key}  , [$ 'th', {key: key+'_inner-th'}, toChildren(node, key)]
-    when 'tableRow'    then $ 'tr', {key}  , [$ 'td', {key: key+'_inner-td'}, toChildren(node, key)]
+    when 'tableHeader'
+      $ 'thead', {key}, [
+        $ 'tr', {key: key+'-_inner-tr'}, node.children.map (cell, i) ->
+          k = key+'-th'+i
+          $ 'th', {key: k}, toChildren(cell, k)
+      ]
+
+    when 'tableRow'
+      # $ 'tr', {key}  , [$ 'td', {key: key+'_inner-td'}, toChildren(node, key)]
+      $ 'tbody', {key}, [
+        $ 'tr', {key: key+'-_inner-td'}, node.children.map (cell, i) ->
+          k = key+'-td'+i
+          $ 'td', {key: k}, toChildren(cell, k)
+      ]
     when 'tableCell'   then $ 'span', {key}, toChildren(node, key)
 
     # Raw html
