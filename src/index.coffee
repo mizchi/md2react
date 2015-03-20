@@ -6,6 +6,15 @@ toChildren = (node, parentKey, tableAlign = []) ->
     align = tableAlign[i]
     compile(child, parentKey+'_'+i, align))
 
+parser = new DOMParser()
+isInvalidXML = (xmlString) ->
+  parsererrorNS = parser.parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
+  dom = parser.parseFromString(xmlString, 'text/xml')
+
+  if dom.getElementsByTagNameNS(parsererrorNS, 'parsererror').length > 0
+    throw new Error('Error parsing XML')
+  return dom;
+
 sanitize = null
 compile = (node, parentKey='_start', tableAlign = null) ->
   key = parentKey+'_'+node.type
@@ -60,7 +69,19 @@ compile = (node, parentKey='_start', tableAlign = null) ->
 
     # Raw html
     when 'html'
+      try
+        isInvalidXML(node.value)
+      catch e
+        return $ 'span', {
+          key: key + ':parse-error'
+          style: {
+            backgroundColor: 'red'
+            color: 'white'
+          }
+        }, node.value
+
       value =
+
         if document? and sanitize
           dompurify = require 'dompurify' # it fire error in node on require
           dompurify.sanitize(node.value)
