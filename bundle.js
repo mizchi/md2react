@@ -23609,7 +23609,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"../src/index":"/Users/mizchi/proj/md2react/src/index.coffee","react":"/Users/mizchi/proj/md2react/node_modules/react/react.js"}],"/Users/mizchi/proj/md2react/src/index.coffee":[function(require,module,exports){
-var $, compile, mdast, sanitize, toChildren;
+var $, compile, isInvalidXML, mdast, parser, sanitize, toChildren;
 
 mdast = require('mdast');
 
@@ -23633,10 +23633,22 @@ toChildren = function(node, parentKey, tableAlign) {
   })();
 };
 
+parser = new DOMParser();
+
+isInvalidXML = function(xmlString) {
+  var dom, parsererrorNS;
+  parsererrorNS = parser.parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI;
+  dom = parser.parseFromString(xmlString, 'text/xml');
+  if (dom.getElementsByTagNameNS(parsererrorNS, 'parsererror').length > 0) {
+    throw new Error('Error parsing XML');
+  }
+  return dom;
+};
+
 sanitize = null;
 
 compile = function(node, parentKey, tableAlign) {
-  var className, dompurify, key, value;
+  var className, dompurify, e, key, value;
   if (parentKey == null) {
     parentKey = '_start';
   }
@@ -23761,6 +23773,18 @@ compile = function(node, parentKey, tableAlign) {
         key: key
       }, toChildren(node, key));
     case 'html':
+      try {
+        isInvalidXML(node.value);
+      } catch (_error) {
+        e = _error;
+        return $('span', {
+          key: key + ':parse-error',
+          style: {
+            backgroundColor: 'red',
+            color: 'white'
+          }
+        }, node.value);
+      }
       value = (typeof document !== "undefined" && document !== null) && sanitize ? (dompurify = require('dompurify'), dompurify.sanitize(node.value)) : node.value;
       return $('div', {
         key: key
