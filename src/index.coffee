@@ -1,12 +1,13 @@
 mdast = require 'mdast'
 
 $ = React.createElement
-toChildren = (node, parentKey) ->
+toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
-    compile(child, parentKey+'_'+i))
+    align = tableAlign[i]
+    compile(child, parentKey+'_'+i, align))
 
 sanitize = null
-compile = (node, parentKey='_start') ->
+compile = (node, parentKey='_start', tableAlign = null) ->
   key = parentKey+'_'+node.type
 
   switch node.type
@@ -40,12 +41,12 @@ compile = (node, parentKey='_start') ->
     when 'blockquote' then $ 'blockquote', {key}, toChildren(node, key)
 
     # Table
-    when 'table'       then $ 'table', {key}, toChildren(node, key)
+    when 'table'       then $ 'table', {key}, toChildren(node, key, node.align)
     when 'tableHeader'
       $ 'thead', {key}, [
         $ 'tr', {key: key+'-_inner-tr'}, node.children.map (cell, i) ->
           k = key+'-th'+i
-          $ 'th', {key: k}, toChildren(cell, k)
+          $ 'th', {key: k, style: {textAlign: tableAlign ? 'left'}}, toChildren(cell, k)
       ]
 
     when 'tableRow'
@@ -53,7 +54,7 @@ compile = (node, parentKey='_start') ->
       $ 'tbody', {key}, [
         $ 'tr', {key: key+'-_inner-td'}, node.children.map (cell, i) ->
           k = key+'-td'+i
-          $ 'td', {key: k}, toChildren(cell, k)
+          $ 'td', {key: k, style: {textAlign: tableAlign ? 'left'}}, toChildren(cell, k)
       ]
     when 'tableCell'   then $ 'span', {key}, toChildren(node, key)
 
