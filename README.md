@@ -43,6 +43,17 @@ See mdast detail in [wooorm/mdast](https://github.com/wooorm/mdast "wooorm/mdast
 
 And `sanitize: true` uses dompurify to raw html input(examle, `<span onload='alert(1)'></span>`)
 
+## ChangeLog
+
+### v0.5.1
+
+- Support table align
+
+### v0.5.0
+
+- Update mdast to 0.12.0
+- Fix table align
+
 ## LICENSE
 
 MIT
