@@ -23615,15 +23615,19 @@ mdast = require('mdast');
 
 $ = React.createElement;
 
-toChildren = function(node, parentKey) {
-  var child, i;
+toChildren = function(node, parentKey, tableAlign) {
+  var align, child, i;
+  if (tableAlign == null) {
+    tableAlign = [];
+  }
   return (function() {
     var _i, _len, _ref, _results;
     _ref = node.children;
     _results = [];
     for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
       child = _ref[i];
-      _results.push(compile(child, parentKey + '_' + i));
+      align = tableAlign[i];
+      _results.push(compile(child, parentKey + '_' + i, align));
     }
     return _results;
   })();
@@ -23631,10 +23635,13 @@ toChildren = function(node, parentKey) {
 
 sanitize = null;
 
-compile = function(node, parentKey) {
+compile = function(node, parentKey, tableAlign) {
   var className, dompurify, key, value;
   if (parentKey == null) {
     parentKey = '_start';
+  }
+  if (tableAlign == null) {
+    tableAlign = null;
   }
   key = parentKey + '_' + node.type;
   switch (node.type) {
@@ -23714,7 +23721,7 @@ compile = function(node, parentKey) {
     case 'table':
       return $('table', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, key, node.align));
     case 'tableHeader':
       return $('thead', {
         key: key
@@ -23725,7 +23732,10 @@ compile = function(node, parentKey) {
           var k;
           k = key + '-th' + i;
           return $('th', {
-            key: k
+            key: k,
+            style: {
+              textAlign: tableAlign != null ? tableAlign : 'left'
+            }
           }, toChildren(cell, k));
         }))
       ]);
@@ -23739,7 +23749,10 @@ compile = function(node, parentKey) {
           var k;
           k = key + '-td' + i;
           return $('td', {
-            key: k
+            key: k,
+            style: {
+              textAlign: tableAlign != null ? tableAlign : 'left'
+            }
           }, toChildren(cell, k));
         }))
       ]);
