@@ -1,19 +1,26 @@
 mdast = require 'mdast'
 uuid = require 'uuid'
-# {DOMParser} = require 'xmldom'
 
 $ = React.createElement
-HTMLWrapper = React.createClass
+defaultHTMLWrapper = React.createClass
   _update: ->
     current = @props.html
     if @_lastHtml isnt current
       @_lastHtml = current
       node = @refs.htmlWrapper.getDOMNode()
-      node.innerHTML = @props.html
+      node.contentDocument.body.innerHTML = @props.html
+      node.style.height = node.contentWindow.document.body.scrollHeight + 'px'
+      node.style.width  = node.contentWindow.document.body.scrollWidth  + 'px'
 
   componentDidUpdate: -> @_update()
   componentDidMount: -> @_update()
-  render: -> $ 'div', ref: 'htmlWrapper'
+
+  render: ->
+    $ 'iframe',
+      ref: 'htmlWrapper'
+      html: @props.html
+      style:
+        border: 'none'
 
 toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
@@ -100,11 +107,13 @@ compile = (node, parentKey='_start', tableAlign = null) ->
           dompurify.sanitize(node.value)
         else
           node.value
-      $ HTMLWrapper, key: key, html: value
+      $ htmlWrapperComponent, key: key, html: value
     else
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
+htmlWrapperComponent = null
 module.exports = (raw, options = {}) ->
+  htmlWrapperComponent = options.htmlWrapperComponent ? defaultHTMLWrapper
   sanitize = options.sanitize ? true
   ast = mdast.parse raw, options
   compile(ast)
