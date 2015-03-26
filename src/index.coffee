@@ -1,8 +1,20 @@
 mdast = require 'mdast'
 uuid = require 'uuid'
-{DOMParser} = require 'xmldom'
+# {DOMParser} = require 'xmldom'
 
 $ = React.createElement
+HTMLWrapper = React.createClass
+  _update: ->
+    current = @props.html
+    if @_lastHtml isnt current
+      @_lastHtml = current
+      node = @refs.htmlWrapper.getDOMNode()
+      node.innerHTML = @props.html
+
+  componentDidUpdate: -> @_update()
+  componentDidMount: -> @_update()
+  render: -> $ 'div', ref: 'htmlWrapper'
+
 toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
     align = tableAlign[i]
@@ -88,9 +100,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
           dompurify.sanitize(node.value)
         else
           node.value
-      $ 'div', {key}, [
-        $ 'div', {key: key+'_raw', dangerouslySetInnerHTML:{__html: value}}
-      ]
+      $ HTMLWrapper, key: key, html: value
     else
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
