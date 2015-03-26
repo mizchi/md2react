@@ -1,4 +1,6 @@
 mdast = require 'mdast'
+uuid = require 'uuid'
+{DOMParser} = require 'xmldom'
 
 $ = React.createElement
 toChildren = (node, parentKey, tableAlign = []) ->
@@ -81,7 +83,6 @@ compile = (node, parentKey='_start', tableAlign = null) ->
         }, node.value
 
       value =
-
         if document? and sanitize
           dompurify = require 'dompurify' # it fire error in node on require
           dompurify.sanitize(node.value)
