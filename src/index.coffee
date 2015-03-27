@@ -44,11 +44,14 @@ compile = (node, parentKey='_start', tableAlign = null) ->
     # No child
     when 'text'           then node.value
     when 'escape'         then '\\'
-    when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
-    when 'code'           then $ 'code', {key, className:'code'}, node.value
     when 'break'          then $ 'br', {key}
     when 'horizontalRule' then $ 'hr', {key}
     when 'image'          then $ 'img', {key, src: node.src, title: node.title, alt: node.alt}
+    when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
+    when 'code'
+      $ 'pre', {key, className:'code'}, [
+        $ 'code', {key: key+'-_inner-code'}, node.value
+      ]
 
     # Has children
     when 'root'       then $ 'div', {key}, toChildren(node, key)
