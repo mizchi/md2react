@@ -24,8 +24,7 @@ defaultHTMLWrapper = React.createClass
 
 toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
-    align = tableAlign[i]
-    compile(child, parentKey+'_'+i, align))
+    compile(child, parentKey+'_'+i, tableAlign))
 
 parser = new DOMParser()
 isInvalidXML = (xmlString) ->
@@ -79,7 +78,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
       $ 'thead', {key}, [
         $ 'tr', {key: key+'-_inner-tr'}, node.children.map (cell, i) ->
           k = key+'-th'+i
-          $ 'th', {key: k, style: {textAlign: tableAlign ? 'left'}}, toChildren(cell, k)
+          $ 'th', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
       ]
 
     when 'tableRow'
@@ -87,7 +86,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
       $ 'tbody', {key}, [
         $ 'tr', {key: key+'-_inner-td'}, node.children.map (cell, i) ->
           k = key+'-td'+i
-          $ 'td', {key: k, style: {textAlign: tableAlign ? 'left'}}, toChildren(cell, k)
+          $ 'td', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
       ]
     when 'tableCell'   then $ 'span', {key}, toChildren(node, key)
 
