@@ -35,7 +35,11 @@ isInvalidXML = (xmlString) ->
     throw new Error('Error parsing XML')
   return dom;
 
+
+# Override by option
 sanitize = null
+highlight = null
+
 compile = (node, parentKey='_start', tableAlign = null) ->
   key = parentKey+'_'+node.type
 
@@ -47,10 +51,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
     when 'horizontalRule' then $ 'hr', {key}
     when 'image'          then $ 'img', {key, src: node.src, title: node.title, alt: node.alt}
     when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
-    when 'code'
-      $ 'pre', {key, className:'code'}, [
-        $ 'code', {key: key+'-_inner-code'}, node.value
-      ]
+    when 'code'           then highlight node.value, node.lang
 
     # Has children
     when 'root'       then $ 'div', {key}, toChildren(node, key)
@@ -117,5 +118,9 @@ htmlWrapperComponent = null
 module.exports = (raw, options = {}) ->
   htmlWrapperComponent = options.htmlWrapperComponent ? defaultHTMLWrapper
   sanitize = options.sanitize ? true
+  highlight = options.highlight ? (code, lang) ->
+    $ 'pre', {key, className: 'code'}, [
+      $ 'code', {key: key+'-_inner-code'}, code
+    ]
   ast = mdast.parse raw, options
   compile(ast)
