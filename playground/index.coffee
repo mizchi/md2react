@@ -43,10 +43,9 @@ bbb
 '''
 
 defaultMarkdown = '''
-|パターン|説明|
-|:--|:--|
-|パターン1|View オブジェクトを宣言したときに Model がインスタンス化される|
-|パターン2|View オブジェクトがインスタンス化されるときに Model もインスタンス化される|
+```js
+var x = 3;
+```
 '''
 
 Editor = React.createClass
@@ -57,6 +56,8 @@ Editor = React.createClass
         gfm: true
         breaks: true
         tables: true
+        highlight: (code, lang) ->
+          "#{lang}: #{code}"
       @setState content: content
     catch e
       console.warn 'markdown parse error'
