@@ -1,5 +1,6 @@
 mdast = require 'mdast'
 uuid = require 'uuid'
+preprocess = require './preprocess'
 
 $ = React.createElement
 defaultHTMLWrapper = React.createClass
@@ -26,21 +27,46 @@ toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
     compile(child, parentKey+'_'+i, tableAlign))
 
+isInvalidXML = -> false
+if global.DOMParser?
+  parser = new DOMParser()
+  isInvalidXML = (xmlString) ->
+    parsererrorNS = parser.parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
+    dom = parser.parseFromString(xmlString, 'text/xml')
 
-parser = new DOMParser()
-isInvalidXML = (xmlString) ->
-  parsererrorNS = parser.parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
-  dom = parser.parseFromString(xmlString, 'text/xml')
+    if dom.getElementsByTagNameNS(parsererrorNS, 'parsererror').length > 0
+      throw new Error('Error parsing XML')
+    return dom
 
-  if dom.getElementsByTagNameNS(parsererrorNS, 'parsererror').length > 0
-    throw new Error('Error parsing XML')
-  return dom;
+renderCompiledToStaticMarkup = (compiled) ->
+  if compiled.props?.html?
+    compiled.props.html
+  else if compiled.type?
+    React.renderToStaticMarkup(compiled)
+  else if typeof(compiled) is 'string'
+    compiled
+  else
+    compiled.toString()
 
+getPropsFromHTMLNode = (node) ->
+  string =
+    if node.subtype is 'folded'
+      node.startTag.value + node.endTag.value
+    else
+      node.value
+  parser = new DOMParser()
+  doc = parser.parseFromString(string, 'text/html')
+  attrs = doc.body.firstElementChild.attributes
+  # TODO: handle parse error
+  props = {}
+  for i in [0...attrs.length]
+    attr = attrs.item(i)
+    props[attr.name] = attr.value
+  props
 
 # Override by option
 sanitize = null
 highlight = null
-
 compile = (node, parentKey='_start', tableAlign = null) ->
   key = parentKey+'_'+node.type
 
@@ -94,24 +120,39 @@ compile = (node, parentKey='_start', tableAlign = null) ->
 
     # Raw html
     when 'html'
-      try
-        isInvalidXML(node.value)
-      catch e
-        return $ 'span', {
-          key: key + ':parse-error'
-          style: {
-            backgroundColor: 'red'
-            color: 'white'
-          }
-        }, node.value
+      if node.subtype is 'folded'
+        k = key+'_'+node.tagName
+        # FIXME: sanitize props used by React (ref, style, etc.)
+        # props = getPropsFromHTMLNode(node)
+        props = {}
+        props.key = k
+        $ node.startTag.tagName, props, toChildren(node, k)
+      else if node.subtype is 'startVoid'
+        k = key+'_'+node.tagName
+        # FIXME: sanitize props used by React (ref, style, etc.)
+        # props = getPropsFromHTMLNode(node)
+        props = {}
+        props.key = k
+        $ node.tagName, props
+      else
+        try
+          isInvalidXML(node.value)
+        catch e
+          return $ 'span', {
+            key: key + ':parse-error'
+            style: {
+              backgroundColor: 'red'
+              color: 'white'
+            }
+          }, node.value
 
-      value =
-        if document? and sanitize
-          dompurify = require 'dompurify' # it fire error in node on require
-          dompurify.sanitize(node.value)
-        else
-          node.value
-      $ htmlWrapperComponent, key: key, html: value
+        value =
+          if document? and sanitize
+            dompurify = require 'dompurify' # it fire error in node on require
+            dompurify.sanitize(node.value)
+          else
+            node.value
+        $ htmlWrapperComponent, key: key, html: value
     else
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
@@ -124,4 +165,5 @@ module.exports = (raw, options = {}) ->
       $ 'code', {key: key+'-_inner-code'}, code
     ]
   ast = mdast.parse raw, options
+  preprocess(ast)
   compile(ast)
