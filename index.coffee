@@ -56,8 +56,8 @@ Editor = React.createClass
         gfm: true
         breaks: true
         tables: true
-        highlight: (code, lang) ->
-          "#{lang}: #{code}"
+        # highlight: (code, lang, key) -> # custom highlighter
+        #   "#{lang}: #{code}"
       @setState content: content
     catch e
       console.warn 'markdown parse error'
