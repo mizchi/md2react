@@ -26,6 +26,7 @@ toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
     compile(child, parentKey+'_'+i, tableAlign))
 
+
 parser = new DOMParser()
 isInvalidXML = (xmlString) ->
   parsererrorNS = parser.parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
@@ -51,7 +52,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
     when 'horizontalRule' then $ 'hr', {key}
     when 'image'          then $ 'img', {key, src: node.src, title: node.title, alt: node.alt}
     when 'inlineCode'     then $ 'code', {key, className:'inlineCode'}, node.value
-    when 'code'           then highlight node.value, node.lang
+    when 'code'           then highlight node.value, node.lang, key
 
     # Has children
     when 'root'       then $ 'div', {key}, toChildren(node, key)
@@ -118,7 +119,7 @@ htmlWrapperComponent = null
 module.exports = (raw, options = {}) ->
   htmlWrapperComponent = options.htmlWrapperComponent ? defaultHTMLWrapper
   sanitize = options.sanitize ? true
-  highlight = options.highlight ? (code, lang) ->
+  highlight = options.highlight ? (code, lang, key) ->
     $ 'pre', {key, className: 'code'}, [
       $ 'code', {key: key+'-_inner-code'}, code
     ]
