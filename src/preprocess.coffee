@@ -1,86 +1,11 @@
-# Returns true if the node is comment, CDATA, or any other non-ordinary tag.
-isSpecialTag = (htmlNode) ->
-  not /^<\/?[0-9a-z]/.test(htmlNode.value)
-
-isStartTag = (htmlNode) ->
-  # The value of an HTML node have one of the following forms:
-  # '<foo ...>', '<foo .../>', '<foo ...>...</foo>', or '</foo>'.
-  # Return true if it has one of the first two forms.
-  not /\/[0-9a-z]+>$/i.test(htmlNode.value)
-
-isEndTag = (htmlNode) ->
-  /^(<\/[0-9a-z]+>)(\n\n<\/[0-9a-z]+>)*$/i.test(htmlNode.value)
-
-isVoidElement = (elementName) ->
-  voidElementNames = ['area', 'base', 'br', 'col', 'command', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']
-  voidElementNames.indexOf(elementName) != -1
-
-isMergedNode = (node) ->
-  pos = node.position
-  pos.start.line is pos.end.line and /\n\n/.test(node.value)
-
-getHTMLSubtype = (htmlNode) ->
-  if isSpecialTag(htmlNode)
-    'special'
-  if isStartTag(htmlNode)
-    if isVoidElement(getTagName(htmlNode))
-      'startVoid'
-    else
-      'start'
-  else if isEndTag(htmlNode)
-    'end'
-  else
-    'startAndEnd'
-
-# Returns tag name.
-# If the node have merged start/end tags like "<b>\n\n<i>" or "</i>\n\n</b>",
-# the name for both of them will be "b,i". Note that outer tag name comes first.
-getTagName = (htmlNode) ->
-  pattern = /<\/?([0-9a-z]+)/ig
-  if htmlNode.subtype is 'startAndEnd'
-    return pattern.exec(htmlNode.value)?[1]
-  names = while (matches = pattern.exec(htmlNode.value))? then matches[1]
-  if htmlNode.subtype is 'end'
-    names = names.reverse()
-  names.join(',')
-
-# Adds the following properties to each HTML node in-place:
-# { "subtype": ("start" | "end" | "startAndEnd" | "startVoid" | "special")
-# , "tagName": tagName }
-# Returns true if one or more nodes are annotated.
-annotateHTMLNodes = (nodes) ->
-  annotated = false
-  for node in nodes
-    if node.type is 'html'
-      node.subtype = getHTMLSubtype(node)
-      node.tagName = getTagName(node)
-      annotated = true
-    if node.children?
-      annotated = annotateHTMLNodes(node.children) or annotated
-  annotated
-
-# Returns nodes by splitting start and end tags which are merged as
-# "<b>\n\n<i>". As a side-effect, `position` of certain HTML nodes will be lost.
-unmergeHTMLNodes = (nodes) ->
-  processedNodes = []
-  for node in nodes
-    if node.type is 'html' and isMergedNode(node)
-      for tag in node.value.split(/\n\n/)
-        processedNodes.push
-          type: 'html'
-          subtype: getHTMLSubtype(value: tag)
-          tagName: getTagName(value: tag)
-          value: tag
-    else
-      if node.children?
-        node.children = unmergeHTMLNodes(node.children)
-      processedNodes.push(node)
-  processedNodes
+preprocess = (root) ->
+  root.children = decomposeHTMLNodes(root.children)
+  root.children = foldHTMLNodes(root.children)
 
 # Returns nodes by converting each occurrence of a series of nodes enclosed by
 # a "start" and an "end" HTML node into one "folded" HTML node. A folded node
 # has `folded` subtype and two additional properties, `startTag` and `endTag`.
-# Its children is the enclosed nodes.
+# Its children are the enclosed nodes.
 foldHTMLNodes = (nodes) ->
   processedNodes = []
   for node in nodes
@@ -108,11 +33,83 @@ foldHTMLNodes = (nodes) ->
       processedNodes.push(node)
   processedNodes
 
-preprocess = (root) ->
-  annotated = annotateHTMLNodes(root.children)
-  if !annotated
-    return # there are no HTML nodes to process
-  root.children = unmergeHTMLNodes(root.children)
-  root.children = foldHTMLNodes(root.children)
+# Decomposes HTML nodes in a given array of nodes and their children. Sets
+# `subtype` of an HTML node to `malformed` if the node could not be decomposed.
+decomposeHTMLNodes = (nodes) ->
+  processedNodes = []
+  for node in nodes
+    if node.type is 'html'
+      fragmentNodes = decomposeHTMLNode(node)
+      if fragmentNodes?
+        Array.prototype.push.apply(processedNodes, fragmentNodes)
+      else
+        node.subtype = 'malformed'
+        processedNodes.push(node)
+    else
+      if node.children?
+        node.children = decomposeHTMLNodes(node.children)
+      processedNodes.push(node)
+  processedNodes
+
+# Decomposes a given HTML node into text nodes and "simple" HTML nodes.
+# If decomposition failed, returns null.
+#
+# mdast can emit "complex" HTML node whose value is like "<b>text</b>".
+# Take this value as an example, this method breaks it down to three nodes:
+# HTML start tag node "<b>"; text node "text"; and HTML end tag node "</b>".
+#
+# Each decomposed HTML node has the `subtype` property.
+# See `createNodeFromHTMLFragment()` for the possible values.
+decomposeHTMLNode = (node) ->
+  value = node.value
+  # mdast may insert "\n\n" between adjacent HTML tags.
+  if node.position.start.line is node.position.end.line
+    value = value.replace(/\n\n/, '')
+  fragments = decomposeHTMLString(value)
+  fragments?.map(createNodeFromHTMLFragment)
+
+# Splits a given string into an array where each element is ether an HTML tag
+# or a string which doesn't contain angle brackets, then returns the array.
+# If a given string contains lone angle brackets, returns null.
+#
+# Example:
+#     Given   "foo<b>bar<br></b>baz"
+#     Returns ["foo", "<b>", "bar", "<br>", "</b>", "baz"]
+#     Given   "<b> oops >_< </b>"
+#     Returns null
+decomposeHTMLString = (str) ->
+  if str is ''
+    return null
+  matches = str.match(/<[^>]*>|[^<>]+/g)
+  sumLength = matches.reduce(((len, s) -> len+s.length), 0)
+  if sumLength isnt str.length
+    null
+  else
+    matches
+
+createNodeFromHTMLFragment = (str) ->
+  if /^[^<]/.test(str)
+    return {
+      type: 'text'
+      value: str
+    }
+  [..., slash, name] = /^<(\/?)([0-9A-Z]+)/i.exec(str) ? []
+  subtype =
+    if !name?
+      'special'
+    else if slash is '/'
+      'end'
+    else if isVoidElement(name)
+      'void'
+    else
+      'start'
+  type: 'html'
+  subtype: subtype
+  tagName: name
+  value: str
+
+isVoidElement = (elementName) ->
+  voidElementNames = ['area', 'base', 'br', 'col', 'command', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']
+  voidElementNames.indexOf(elementName) != -1
 
 module.exports = preprocess
