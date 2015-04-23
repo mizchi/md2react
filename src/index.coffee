@@ -2,66 +2,40 @@ mdast = require 'mdast'
 uuid = require 'uuid'
 preprocess = require './preprocess'
 
+ATTR_WHITELIST = ['href', 'src', 'target']
+
 $ = React.createElement
-defaultHTMLWrapper = React.createClass
-  _update: ->
-    current = @props.html
-    if @_lastHtml isnt current
-      @_lastHtml = current
-      node = @refs.htmlWrapper.getDOMNode()
-      node.contentDocument.body.innerHTML = @props.html
-      node.style.height = node.contentWindow.document.body.scrollHeight + 'px'
-      node.style.width  = node.contentWindow.document.body.scrollWidth  + 'px'
-
-  componentDidUpdate: -> @_update()
-  componentDidMount: -> @_update()
-
-  render: ->
-    $ 'iframe',
-      ref: 'htmlWrapper'
-      html: @props.html
-      style:
-        border: 'none'
 
 toChildren = (node, parentKey, tableAlign = []) ->
   return (for child, i in node.children
     compile(child, parentKey+'_'+i, tableAlign))
 
-isInvalidXML = -> false
-if global.DOMParser?
-  parser = new DOMParser()
-  isInvalidXML = (xmlString) ->
-    parsererrorNS = parser.parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
-    dom = parser.parseFromString(xmlString, 'text/xml')
+isValidDocument = (doc) ->
+  parsererrorNS = (new DOMParser()).parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
+  doc.getElementsByTagNameNS(parsererrorNS, 'parsererror').length == 0
 
-    if dom.getElementsByTagNameNS(parsererrorNS, 'parsererror').length > 0
-      throw new Error('Error parsing XML')
-    return dom
-
-renderCompiledToStaticMarkup = (compiled) ->
-  if compiled.props?.html?
-    compiled.props.html
-  else if compiled.type?
-    React.renderToStaticMarkup(compiled)
-  else if typeof(compiled) is 'string'
-    compiled
-  else
-    compiled.toString()
-
-getPropsFromHTMLNode = (node) ->
+getPropsFromHTMLNode = (node, attrWhitelist) ->
   string =
     if node.subtype is 'folded'
       node.startTag.value + node.endTag.value
-    else
+    else if node.subtype is 'void'
       node.value
+    else
+      null
+  if !string?
+    return null
+
   parser = new DOMParser()
   doc = parser.parseFromString(string, 'text/html')
+  if !isValidDocument(doc)
+    return null
+
   attrs = doc.body.firstElementChild.attributes
-  # TODO: handle parse error
   props = {}
   for i in [0...attrs.length]
     attr = attrs.item(i)
-    props[attr.name] = attr.value
+    if !attrWhitelist? or (attr.name in attrWhitelist)
+      props[attr.name] = attr.value
   props
 
 # Override by option
@@ -122,43 +96,33 @@ compile = (node, parentKey='_start', tableAlign = null) ->
     when 'html'
       if node.subtype is 'folded'
         k = key+'_'+node.tagName
-        # FIXME: sanitize props used by React (ref, style, etc.)
-        # props = getPropsFromHTMLNode(node)
-        props = {}
+        props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
         props.key = k
         $ node.startTag.tagName, props, toChildren(node, k)
-      else if node.subtype is 'startVoid'
+      else if node.subtype is 'void'
         k = key+'_'+node.tagName
-        # FIXME: sanitize props used by React (ref, style, etc.)
-        # props = getPropsFromHTMLNode(node)
-        props = {}
+        props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
         props.key = k
         $ node.tagName, props
+      else if node.subtype is 'special'
+        $ 'span', {
+          key: key + ':special'
+          style: {
+            color: 'gray'
+          }
+        }, node.value
       else
-        try
-          isInvalidXML(node.value)
-        catch e
-          return $ 'span', {
-            key: key + ':parse-error'
-            style: {
-              backgroundColor: 'red'
-              color: 'white'
-            }
-          }, node.value
-
-        value =
-          if document? and sanitize
-            dompurify = require 'dompurify' # it fire error in node on require
-            dompurify.sanitize(node.value)
-          else
-            node.value
-        $ htmlWrapperComponent, key: key, html: value
+        $ 'span', {
+          key: key + ':parse-error'
+          style: {
+            backgroundColor: 'red'
+            color: 'white'
+          }
+        }, node.value
     else
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
-htmlWrapperComponent = null
 module.exports = (raw, options = {}) ->
-  htmlWrapperComponent = options.htmlWrapperComponent ? defaultHTMLWrapper
   sanitize = options.sanitize ? true
   highlight = options.highlight ? (code, lang, key) ->
     $ 'pre', {key, className: 'code'}, [
