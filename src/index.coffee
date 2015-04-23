@@ -46,7 +46,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
 
   switch node.type
     # No child
-    when 'text'           then rawTextWrapper node.value
+    when 'text'           then rawValueWrapper node.value
     when 'escape'         then '\\'
     when 'break'          then $ 'br', {key}
     when 'horizontalRule' then $ 'hr', {key}
@@ -123,11 +123,12 @@ compile = (node, parentKey='_start', tableAlign = null) ->
       throw node.type + ' is unsuppoted node type. report to https://github.com/mizchi/md2react/issues'
 
 htmlWrapperComponent = null
-rawTextWrapper = null
+rawValueWrapper = null
 
 module.exports = (raw, options = {}) ->
   sanitize = options.sanitize ? true
-  rawValueWrapper = options.rawTextWrapper ? (text) -> text
+  rawValueWrapper = options.rawValueWrapper ? (text) -> text
+
   highlight = options.highlight ? (code, lang, key) ->
     $ 'pre', {key, className: 'code'}, [
       $ 'code', {key: key+'-_inner-code'}, code
