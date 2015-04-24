@@ -23415,8 +23415,8 @@ window.addEventListener('DOMContentLoaded', function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"../src/index":162,"react":158}],162:[function(require,module,exports){
-var $, ATTR_WHITELIST, compile, getPropsFromHTMLNode, highlight, isValidDocument, mdast, preprocess, sanitize, toChildren, uuid,
-  indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
+var $, ATTR_WHITELIST, compile, getPropsFromHTMLNode, highlight, htmlWrapperComponent, isValidDocument, mdast, preprocess, rawValueWrapper, sanitize, toChildren, uuid,
+  __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
 mdast = require('mdast');
 
@@ -23434,14 +23434,14 @@ toChildren = function(node, parentKey, tableAlign) {
     tableAlign = [];
   }
   return (function() {
-    var j, len, ref, results;
-    ref = node.children;
-    results = [];
-    for (i = j = 0, len = ref.length; j < len; i = ++j) {
-      child = ref[i];
-      results.push(compile(child, parentKey + '_' + i, tableAlign));
+    var _i, _len, _ref, _results;
+    _ref = node.children;
+    _results = [];
+    for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
+      child = _ref[i];
+      _results.push(compile(child, parentKey + '_' + i, tableAlign));
     }
-    return results;
+    return _results;
   })();
 };
 
@@ -23452,7 +23452,7 @@ isValidDocument = function(doc) {
 };
 
 getPropsFromHTMLNode = function(node, attrWhitelist) {
-  var attr, attrs, doc, i, j, parser, props, ref, ref1, string;
+  var attr, attrs, doc, i, parser, props, string, _i, _ref, _ref1;
   string = node.subtype === 'folded' ? node.startTag.value + node.endTag.value : node.subtype === 'void' ? node.value : null;
   if (string == null) {
     return null;
@@ -23464,9 +23464,9 @@ getPropsFromHTMLNode = function(node, attrWhitelist) {
   }
   attrs = doc.body.firstElementChild.attributes;
   props = {};
-  for (i = j = 0, ref = attrs.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
+  for (i = _i = 0, _ref = attrs.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
     attr = attrs.item(i);
-    if ((attrWhitelist == null) || (ref1 = attr.name, indexOf.call(attrWhitelist, ref1) >= 0)) {
+    if ((attrWhitelist == null) || (_ref1 = attr.name, __indexOf.call(attrWhitelist, _ref1) >= 0)) {
       props[attr.name] = attr.value;
     }
   }
@@ -23478,7 +23478,7 @@ sanitize = null;
 highlight = null;
 
 compile = function(node, parentKey, tableAlign) {
-  var className, k, key, props, ref, ref1;
+  var className, k, key, props, _ref, _ref1;
   if (parentKey == null) {
     parentKey = '_start';
   }
@@ -23488,7 +23488,7 @@ compile = function(node, parentKey, tableAlign) {
   key = parentKey + '_' + node.type;
   switch (node.type) {
     case 'text':
-      return node.value;
+      return rawValueWrapper(node.value);
     case 'escape':
       return '\\';
     case 'break':
@@ -23568,12 +23568,12 @@ compile = function(node, parentKey, tableAlign) {
         $('tr', {
           key: key + '-_inner-tr'
         }, node.children.map(function(cell, i) {
-          var k, ref;
+          var k, _ref;
           k = key + '-th' + i;
           return $('th', {
             key: k,
             style: {
-              textAlign: (ref = tableAlign[i]) != null ? ref : 'left'
+              textAlign: (_ref = tableAlign[i]) != null ? _ref : 'left'
             }
           }, toChildren(cell, k));
         }))
@@ -23585,12 +23585,12 @@ compile = function(node, parentKey, tableAlign) {
         $('tr', {
           key: key + '-_inner-td'
         }, node.children.map(function(cell, i) {
-          var k, ref;
+          var k, _ref;
           k = key + '-td' + i;
           return $('td', {
             key: k,
             style: {
-              textAlign: (ref = tableAlign[i]) != null ? ref : 'left'
+              textAlign: (_ref = tableAlign[i]) != null ? _ref : 'left'
             }
           }, toChildren(cell, k));
         }))
@@ -23602,12 +23602,12 @@ compile = function(node, parentKey, tableAlign) {
     case 'html':
       if (node.subtype === 'folded') {
         k = key + '_' + node.tagName;
-        props = (ref = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref : {};
+        props = (_ref = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? _ref : {};
         props.key = k;
         return $(node.startTag.tagName, props, toChildren(node, k));
       } else if (node.subtype === 'void') {
         k = key + '_' + node.tagName;
-        props = (ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref1 : {};
+        props = (_ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? _ref1 : {};
         props.key = k;
         return $(node.tagName, props);
       } else if (node.subtype === 'special') {
@@ -23632,13 +23632,20 @@ compile = function(node, parentKey, tableAlign) {
   }
 };
 
+htmlWrapperComponent = null;
+
+rawValueWrapper = null;
+
 module.exports = function(raw, options) {
-  var ast, ref, ref1;
+  var ast, _ref, _ref1, _ref2;
   if (options == null) {
     options = {};
   }
-  sanitize = (ref = options.sanitize) != null ? ref : true;
-  highlight = (ref1 = options.highlight) != null ? ref1 : function(code, lang, key) {
+  sanitize = (_ref = options.sanitize) != null ? _ref : true;
+  rawValueWrapper = (_ref1 = options.rawValueWrapper) != null ? _ref1 : function(text) {
+    return text;
+  };
+  highlight = (_ref2 = options.highlight) != null ? _ref2 : function(code, lang, key) {
     return $('pre', {
       key: key,
       className: 'code'
@@ -23664,13 +23671,13 @@ preprocess = function(root) {
 };
 
 foldHTMLNodes = function(nodes) {
-  var children, folded, i, index, j, len1, len2, node, pNode, processedNodes, startTag, startTagIndex;
+  var children, folded, index, node, pNode, processedNodes, startTag, startTagIndex, _i, _j, _len, _len1;
   processedNodes = [];
-  for (i = 0, len1 = nodes.length; i < len1; i++) {
-    node = nodes[i];
+  for (_i = 0, _len = nodes.length; _i < _len; _i++) {
+    node = nodes[_i];
     if (node.subtype === 'end') {
       startTagIndex = null;
-      for (index = j = 0, len2 = processedNodes.length; j < len2; index = ++j) {
+      for (index = _j = 0, _len1 = processedNodes.length; _j < _len1; index = ++_j) {
         pNode = processedNodes[index];
         if (pNode.subtype === 'start' && pNode.tagName === node.tagName) {
           startTagIndex = index;
@@ -23702,10 +23709,10 @@ foldHTMLNodes = function(nodes) {
 };
 
 decomposeHTMLNodes = function(nodes) {
-  var fragmentNodes, i, len1, node, processedNodes;
+  var fragmentNodes, node, processedNodes, _i, _len;
   processedNodes = [];
-  for (i = 0, len1 = nodes.length; i < len1; i++) {
-    node = nodes[i];
+  for (_i = 0, _len = nodes.length; _i < _len; _i++) {
+    node = nodes[_i];
     if (node.type === 'html') {
       fragmentNodes = decomposeHTMLNode(node);
       if (fragmentNodes != null) {
@@ -23751,14 +23758,14 @@ decomposeHTMLString = function(str) {
 };
 
 createNodeFromHTMLFragment = function(str) {
-  var i, name, ref, ref1, slash, subtype;
+  var name, slash, subtype, _i, _ref, _ref1;
   if (/^[^<]/.test(str)) {
     return {
       type: 'text',
       value: str
     };
   }
-  ref1 = (ref = /^<(\/?)([0-9A-Z]+)/i.exec(str)) != null ? ref : [], i = ref1.length - 2, slash = ref1[i++], name = ref1[i++];
+  _ref1 = (_ref = /^<(\/?)([0-9A-Z]+)/i.exec(str)) != null ? _ref : [], _i = _ref1.length - 2, slash = _ref1[_i++], name = _ref1[_i++];
   subtype = name == null ? 'special' : slash === '/' ? 'end' : isVoidElement(name) ? 'void' : 'start';
   return {
     type: 'html',
