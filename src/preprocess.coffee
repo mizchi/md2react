@@ -1,6 +1,7 @@
 preprocess = (root) ->
   root.children = decomposeHTMLNodes(root.children)
   root.children = foldHTMLNodes(root.children)
+  root
 
 # Returns nodes by converting each occurrence of a series of nodes enclosed by
 # a "start" and an "end" HTML node into one "folded" HTML node. A folded node

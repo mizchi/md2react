@@ -23415,7 +23415,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"../src/index":162,"react":158}],162:[function(require,module,exports){
-var $, ATTR_WHITELIST, compile, getPropsFromHTMLNode, highlight, isValidDocument, mdast, preprocess, sanitize, toChildren, uuid,
+var $, ATTR_WHITELIST, compile, getPropsFromHTMLNode, highlight, htmlWrapperComponent, isValidDocument, mdast, preprocess, rawValueWrapper, sanitize, toChildren, uuid,
   indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
 mdast = require('mdast');
@@ -23488,7 +23488,7 @@ compile = function(node, parentKey, tableAlign) {
   key = parentKey + '_' + node.type;
   switch (node.type) {
     case 'text':
-      return node.value;
+      return rawValueWrapper(node.value);
     case 'escape':
       return '\\';
     case 'break':
@@ -23632,13 +23632,20 @@ compile = function(node, parentKey, tableAlign) {
   }
 };
 
+htmlWrapperComponent = null;
+
+rawValueWrapper = null;
+
 module.exports = function(raw, options) {
-  var ast, ref, ref1;
+  var ast, ref, ref1, ref2, ref3;
   if (options == null) {
     options = {};
   }
   sanitize = (ref = options.sanitize) != null ? ref : true;
-  highlight = (ref1 = options.highlight) != null ? ref1 : function(code, lang, key) {
+  rawValueWrapper = (ref1 = options.rawValueWrapper) != null ? ref1 : function(text) {
+    return text;
+  };
+  highlight = (ref2 = options.highlight) != null ? ref2 : function(code, lang, key) {
     return $('pre', {
       key: key,
       className: 'code'
@@ -23649,7 +23656,8 @@ module.exports = function(raw, options) {
     ]);
   };
   ast = mdast.parse(raw, options);
-  preprocess(ast);
+  ast = preprocess(ast);
+  ast = (ref3 = typeof options.preprocessAST === "function" ? options.preprocessAST(ast) : void 0) != null ? ref3 : ast;
   return compile(ast);
 };
 
@@ -23660,7 +23668,8 @@ var createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decompose
 
 preprocess = function(root) {
   root.children = decomposeHTMLNodes(root.children);
-  return root.children = foldHTMLNodes(root.children);
+  root.children = foldHTMLNodes(root.children);
+  return root;
 };
 
 foldHTMLNodes = function(nodes) {
