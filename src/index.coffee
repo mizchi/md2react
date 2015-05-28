@@ -134,5 +134,6 @@ module.exports = (raw, options = {}) ->
       $ 'code', {key: key+'-_inner-code'}, code
     ]
   ast = mdast.parse raw, options
-  preprocess(ast)
+  ast = preprocess(ast)
+  ast = options.preprocessAST?(ast) ? ast
   compile(ast)
