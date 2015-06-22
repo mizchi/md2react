@@ -56,6 +56,7 @@ Editor = React.createClass
         gfm: true
         breaks: true
         tables: true
+        commonmark: true
         # highlight: (code, lang, key) -> # custom highlighter
         #   "#{lang}: #{code}"
       @setState content: content
