@@ -62,22 +62,23 @@ process.umask = function() { return 0; };
 'use strict';
 
 /*
- * Dependencies..
+ * Dependencies.
  */
 
 var Ware = require('ware');
+var parser = require('./lib/parse.js');
+var stringifier = require('./lib/stringify.js');
+var File = require('./lib/file.js');
+var utilities = require('./lib/utilities.js');
 
 /*
- * Components.
+ * Methods.
  */
 
-var parse = require('./lib/parse.js');
-var stringify = require('./lib/stringify.js');
-var clone = require('./lib/utilities.js').clone;
-
-var Parser = parse.Parser;
+var clone = utilities.clone;
+var Parser = parser.Parser;
 var parseProto = Parser.prototype;
-var Compiler = stringify.Compiler;
+var Compiler = stringifier.Compiler;
 var compileProto = Compiler.prototype;
 
 /**
@@ -97,8 +98,7 @@ function fail(exception) {
 }
 
 /**
- * Create a `parse` function which uses an
- * extensible `Parser`.
+ * Create a custom, cloned, Parser.
  *
  * @return {Function}
  */
@@ -146,8 +146,7 @@ function constructParser() {
 }
 
 /**
- * Create a `stringify` function which uses an
- * extensible `Compiler`.
+ * Create a custom, cloned, Compiler.
  *
  * @return {Function}
  */
@@ -181,151 +180,275 @@ function constructCompiler() {
  * @constructor {MDAST}
  */
 function MDAST() {
-    this.ware = new Ware();
-
-    this.Parser = constructParser();
-    this.Compiler = constructCompiler();
-}
-
-/**
- * Apply plugins to `node`.
- *
- * @param {Node} node
- * @param {Object?} options
- * @return {Node} - `node`.
- */
-function run(node, options) {
     var self = this;
 
-    /*
-     * Only run when this is an instance of MDAST.
-     */
-
-    if (self.ware) {
-        self.ware.run(node, options || {}, self, fail);
+    if (!(self instanceof MDAST)) {
+        return new MDAST();
     }
 
-    return node;
+    self.ware = new Ware();
+    self.attachers = [];
+
+    self.Parser = constructParser();
+    self.Compiler = constructCompiler();
 }
 
 /**
- * Construct an MDAST instance and use a plugin.
+ * Attach a plugin.
  *
- * @param {Function} plugin
+ * @param {Function|Array.<Function>} attach
+ * @param {Object?} options
  * @return {MDAST}
  */
-function use(plugin) {
+function use(attach, options) {
     var self = this;
+    var index;
+    var transformer;
 
     if (!(self instanceof MDAST)) {
         self = new MDAST();
     }
 
-    self.ware.use(plugin);
+    /*
+     * Multiple attachers.
+     */
 
-    if (plugin && 'attach' in plugin) {
-        plugin.attach(self);
+    if ('length' in attach && typeof attach !== 'function') {
+        index = attach.length;
+
+        while (attach[--index]) {
+            self.use(attach[index]);
+        }
+
+        return self;
+    }
+
+    /*
+     * Single plugin.
+     */
+
+    if (self.attachers.indexOf(attach) === -1) {
+        transformer = attach(self, options);
+
+        self.attachers.push(attach);
+
+        if (transformer) {
+            self.ware.use(transformer);
+        }
     }
 
     return self;
 }
 
 /**
- * Parse a value and apply plugins.
+ * Apply transformers to `node`.
  *
- * @return {Root}
+ * @param {Node} ast
+ * @param {File?} [file]
+ * @param {Function?} [done]
+ * @return {Node} - `ast`.
  */
-function runParse(_, options) {
-    return this.run(parse.apply(this, arguments), options);
+function run(ast, file, done) {
+    var self = this;
+
+    if (typeof file === 'function') {
+        done = file;
+        file = null;
+    }
+
+    file = new File(file);
+
+    done = typeof done === 'function' ? done : fail;
+
+    if (typeof ast !== 'object' && typeof ast.type !== 'string') {
+        utilities.raise(ast, 'ast');
+    }
+
+    /*
+     * Only run when this is an instance of MDAST.
+     */
+
+    if (self.ware) {
+        self.ware.run(ast, file, done);
+    } else {
+        done(null, ast, file);
+    }
+
+    return ast;
+}
+
+/**
+ * Wrapper to pass a file to `parser`.
+ */
+function parse(value, options) {
+    return parser.call(this, new File(value), options);
+}
+
+/**
+ * Wrapper to pass a file to `stringifier`.
+ */
+function stringify(ast, file, options) {
+    if (options === null || options === undefined) {
+        options = file;
+        file = null;
+    }
+
+    return stringifier.call(this, ast, new File(file), options);
+}
+
+/**
+ * Parse a value and apply transformers.
+ *
+ * @param {string|File} value
+ * @param {Object?} [options]
+ * @param {Function?} [done]
+ * @return {string?}
+ */
+function process(value, options, done) {
+    var file = new File(value);
+    var self = this instanceof MDAST ? this : new MDAST();
+    var result = null;
+    var ast;
+
+    if (typeof options === 'function') {
+        done = options;
+        options = null;
+    }
+
+    if (!options) {
+        options = {};
+    }
+
+    /**
+     * Invoked when `run` completes. Hoists `result` into
+     * the upper scope to return something for sync
+     * operations.
+     */
+    function callback(exception) {
+        if (exception) {
+            (done || fail)(exception);
+        } else {
+            result = self.stringify(ast, file, options);
+
+            if (done) {
+                done(null, result, file);
+            }
+        }
+    }
+
+    ast = self.parse(file, options);
+    self.run(ast, file, callback);
+
+    return result;
 }
 
 /*
- * Prototype.
+ * Methods.
  */
 
-MDAST.prototype.parse = runParse;
-MDAST.prototype.stringify = stringify;
-MDAST.prototype.use = use;
-MDAST.prototype.run = run;
+var proto = MDAST.prototype;
+
+proto.use = use;
+proto.parse = parse;
+proto.run = run;
+proto.stringify = stringify;
+proto.process = process;
+
+/*
+ * Functions.
+ */
+
+MDAST.use = use;
+MDAST.parse = parse;
+MDAST.run = run;
+MDAST.stringify = stringify;
+MDAST.process = process;
 
 /*
  * Expose `mdast`.
  */
 
-module.exports = {
-    'parse': parse,
-    'stringify': stringify,
-    'use': use,
-    'run': run
-};
+module.exports = MDAST;
 
-},{"./lib/parse.js":5,"./lib/stringify.js":6,"./lib/utilities.js":7,"ware":10}],3:[function(require,module,exports){
+},{"./lib/file.js":5,"./lib/parse.js":6,"./lib/stringify.js":7,"./lib/utilities.js":8,"ware":12}],3:[function(require,module,exports){
+/**
+ * @author Titus Wormer
+ * @copyright 2015 Titus Wormer. All rights reserved.
+ * @module Defaults
+ * @fileoverview Default values for parse and
+ *  stringification settings.
+ */
+
 'use strict';
 
-var parse = {
-    'gfm': true,
-    'yaml': true,
-    'commonmark': false,
-    'footnotes': false,
-    'pedantic': false,
-    'breaks': false
-};
+/*
+ * Note that `stringify.entities` is a string.
+ */
 
-var stringify = {
-    'setext': false,
-    'closeAtx': false,
-    'looseTable': false,
-    'spacedTable': true,
-    'referenceLinks': false,
-    'fences': false,
-    'fence': '`',
-    'bullet': '-',
-    'rule': '*',
-    'ruleSpaces': true,
-    'ruleRepetition': 3,
-    'strong': '*',
-    'emphasis': '_'
+module.exports = {
+    'parse': {
+        'position': true,
+        'gfm': true,
+        'yaml': true,
+        'commonmark': false,
+        'footnotes': false,
+        'pedantic': false,
+        'breaks': false
+    },
+    'stringify': {
+        'entities': 'false',
+        'setext': false,
+        'closeAtx': false,
+        'looseTable': false,
+        'spacedTable': true,
+        'incrementListMarker': true,
+        'fences': false,
+        'fence': '`',
+        'bullet': '-',
+        'rule': '*',
+        'ruleSpaces': true,
+        'ruleRepetition': 3,
+        'strong': '*',
+        'emphasis': '_'
+    }
 };
-
-exports.parse = parse;
-exports.stringify = stringify;
 
 },{}],4:[function(require,module,exports){
 /* This file is generated by `script/build-expressions.js` */
 module.exports = {
   'rules': {
     'newline': /^\n([ \t]*\n)*/,
-    'bullet': /(?:[*+-]|\d+\.)/,
     'code': /^((?: {4}|\t)[^\n]*\n?([ \t]*\n)*)+/,
     'horizontalRule': /^[ \t]*([-*_])( *\1){2,} *(?=\n|$)/,
-    'heading': /^([ \t]*)(#{1,6})([ \t]*)([^\n]*?)[ \t]*#*[ \t]*(?=\n|$)/,
+    'heading': /^([ \t]*)(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?[ \t]*(?=\n|$)/,
     'lineHeading': /^(\ {0,3})([^\n]+?)[ \t]*\n\ {0,3}(=|-){1,}[ \t]*(?=\n|$)/,
-    'linkDefinition': /^[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$)/,
-    'blockText': /^[^\n]+/,
-    'item': /^([ \t]*)((?:[*+-]|\d+\.))[ \t][^\n]*(?:\n(?!\1(?:[*+-]|\d+\.)[ \t])[^\n]*)*/gm,
-    'list': /^([ \t]*)((?:[*+-]|\d+\.))((?:[ \t][\s\S]+?)(?:\n+(?=\1?(?:[-*_][ \t]*){3,}(?:\n|$))|\n+(?=[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\1(?:[*+-]|\d+\.)[ \t])|\s*$))/,
-    'blockquote': /^(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?/,
-    'html': /^[ \t]*(?:<!--[\s\S]*?-->[ \t]*(?:\n|\s*$)|<((?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)\w+(?!:\/|[^\w\s@]*@)\b)[\s\S]+?<\/\1>[ \t]*(?:\n{2,}|\s*$)|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)\w+(?!:\/|[^\w\s@]*@)\b(?:"[^"]*"|'[^']*'|[^'">])*?>[ \t]*(?:\n{2,}|\s*$))/i,
-    'paragraph': /^(?:(?:[^\n]+\n?(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|([ \t]*)(#{1,6})([ \t]*)([^\n]*?)[ \t]*#*[ \t]*(?=\n|$)|(\ {0,3})([^\n]+?)[ \t]*\n\ {0,3}(=|-){1,}[ \t]*(?=\n|$)|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$)|(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
+    'definition': /^[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$)/,
+    'bullet': /(?:[*+-]|\d+\.)/,
+    'indent': /^([ \t]*)((?:[*+-]|\d+\.))( {1,4}(?! )| |\t)/,
+    'item': /([ \t]*)((?:[*+-]|\d+\.))( {1,4}(?! )| |\t)[^\n]*(?:\n(?!\1(?:[*+-]|\d+\.)[ \t])[^\n]*)*/gm,
+    'list': /^([ \t]*)((?:[*+-]|\d+\.))[ \t][\s\S]+?(?:(?=\n+\1?(?:[-*_][ \t]*){3,}(?:\n|$))|(?=\n+[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\1(?:[*+-]|\d+\.)[ \t])|$)/,
+    'blockquote': /^(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?/,
+    'html': /^[ \t]*(?:<!--[\s\S]*?-->[ \t]*(?:\n|\s*$)|<((?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b)[\s\S]+?<\/\1>[ \t]*(?:\n{2,}|\s*$)|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b(?:"[^"]*"|'[^']*'|[^'">])*?>[ \t]*(?:\n{2,}|\s*$))/i,
+    'paragraph': /^(?:(?:[^\n]+\n?(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|([ \t]*)(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?[ \t]*(?=\n|$)|(\ {0,3})([^\n]+?)[ \t]*\n\ {0,3}(=|-){1,}[ \t]*(?=\n|$)|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$)|(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
     'escape': /^\\([\\`*{}\[\]()#+\-.!_>])/,
     'autoLink': /^<([^ >]+(@|:\/)[^ >]+)>/,
     'tag': /^<!--[\s\S]*?-->|^<\/?\w+(?:"[^"]*"|'[^']*'|[^'">])*?>/,
-    'invalidLink': /^(!?\[)((?:\[[^\]]*\]|[^\[\]])*)\]/,
     'strong': /^(_)_([\s\S]+?)__(?!_)|^(\*)\*([\s\S]+?)\*\*(?!\*)/,
     'emphasis': /^\b(_)((?:__|[\s\S])+?)_\b|^(\*)((?:\*\*|[\s\S])+?)\*(?!\*)/,
     'inlineCode': /^(`+)((?!`)[\s\S]*?(?:`\s+|[^`]))?(\1)(?!`)/,
     'break': /^ {2,}\n(?!\s*$)/,
     'inlineText': /^[\s\S]+?(?=[\\<!\[_*`]| {2,}\n|$)/,
     'link': /^(!?\[)((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\(\s*(?:(?!<)((?:\((?:\\[\s\S]|[^\)])*?\)|\\[\s\S]|[\s\S])*?)|<([\s\S]*?)>)(?:\s+['"]([\s\S]*?)['"])?\s*\)/,
-    'referenceLink': /^(!?\[)((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\s*\[((?:\\[\s\S]|[^\]])*)\]/
+    'shortcutReference': /^(!?\[)((?:\\[\s\S]|[^\[\]])+?)\]/,
+    'reference': /^(!?\[)((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\s*\[((?:\\[\s\S]|[^\[\]])*)\]/
   },
   'gfm': {
-    'fences': /^( *)(([`~])\3{2,})[ \t]*([^\s`~]+)?[ \t]*(?:\n([\s\S]*?))??(?:\n\ {0,3}\2\3*[ \t]*(?=\n|$)|$)/,
-    'paragraph': /^(?:(?:[^\n]+\n?(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|( *)(([`~])\5{2,})[ \t]*([^\s`~]+)?[ \t]*(?:\n([\s\S]*?))??(?:\n\ {0,3}\4\5*[ \t]*(?=\n|$)|$)|([ \t]*)((?:[*+-]|\d+\.))((?:[ \t][\s\S]+?)(?:\n+(?=\8?(?:[-*_][ \t]*){3,}(?:\n|$))|\n+(?=[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\8(?:[*+-]|\d+\.)[ \t])|\s*$))|([ \t]*)(#{1,6})([ \t]*)([^\n]*?)[ \t]*#*[ \t]*(?=\n|$)|(\ {0,3})([^\n]+?)[ \t]*\n\ {0,3}(=|-){1,}[ \t]*(?=\n|$)|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$)|(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
+    'fences': /^( *)(([`~])\3{2,})[ \t]*([^\n`~]+)?[ \t]*(?:\n([\s\S]*?))??(?:\n\ {0,3}\2\3*[ \t]*(?=\n|$)|$)/,
+    'paragraph': /^(?:(?:[^\n]+\n?(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|( *)(([`~])\5{2,})[ \t]*([^\n`~]+)?[ \t]*(?:\n([\s\S]*?))??(?:\n\ {0,3}\4\5*[ \t]*(?=\n|$)|$)|([ \t]*)((?:[*+-]|\d+\.))[ \t][\s\S]+?(?:(?=\n+\8?(?:[-*_][ \t]*){3,}(?:\n|$))|(?=\n+[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\8(?:[*+-]|\d+\.)[ \t])|$)|([ \t]*)(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?[ \t]*(?=\n|$)|(\ {0,3})([^\n]+?)[ \t]*\n\ {0,3}(=|-){1,}[ \t]*(?=\n|$)|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$)|(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
     'table': /^( *\|(.+))\n( *\|( *[-:]+[-| :]*)\n)((?: *\|.*(?:\n|$))*)/,
     'looseTable': /^( *(\S.*\|.*))\n( *([-:]+ *\|[-| :]*)\n)((?:.*\|.*(?:\n|$))*)/,
     'escape': /^\\([\\`*{}\[\]()#+\-.!_>~|])/,
-    'url': /^(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/,
+    'url': /^https?:\/\/[^\s<]+[^<.,:;"')\]\s]/,
     'deletion': /^~~(?=\S)([\s\S]*?\S)~~/,
     'inlineText': /^[\s\S]+?(?=[\\<!\[_*`~]|https?:\/\/| {2,}\n|$)/
   },
@@ -336,19 +459,23 @@ module.exports = {
     'yamlFrontMatter': /^-{3}\n([\s\S]+?\n)?-{3}/
   },
   'pedantic': {
+    'heading': /^([ \t]*)(#{1,6})([ \t]*)([^\n]*?)[ \t]*#*[ \t]*(?=\n|$)/,
     'strong': /^(_)_(?=\S)([\s\S]*?\S)__(?!_)|^(\*)\*(?=\S)([\s\S]*?\S)\*\*(?!\*)/,
     'emphasis': /^(_)(?=\S)([\s\S]*?\S)_(?!_)|^(\*)(?=\S)([\s\S]*?\S)\*(?!\*)/
   },
   'commonmark': {
-    'heading': /^([ \t]*)(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?[ \t]*(?=\n|$)/,
+    'list': /^([ \t]*)((?:[*+-]|\d+[\.\)]))[ \t][\s\S]+?(?:(?=\n+\1?(?:[-*_][ \t]*){3,}(?:\n|$))|(?=\n+[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\1(?:[*+-]|\d+[\.\)])[ \t])|$)/,
+    'item': /([ \t]*)((?:[*+-]|\d+[\.\)]))( {1,4}(?! )| |\t)[^\n]*(?:\n(?!\1(?:[*+-]|\d+[\.\)])[ \t])[^\n]*)*/gm,
+    'bullet': /(?:[*+-]|\d+[\.\)])/,
+    'indent': /^([ \t]*)((?:[*+-]|\d+[\.\)]))( {1,4}(?! )| |\t)/,
     'link': /^(!?\[)((?:(?:\[(?:\[(?:\\[\s\S]|[^\[\]])*?\]|\\[\s\S]|[^\[\]])*?\])|\\[\s\S]|[^\[\]])*?)\]\(\s*(?:(?!<)((?:\((?:\\[\s\S]|[^\(\)\s])*?\)|\\[\s\S]|[^\(\)\s])*?)|<([^\n]*?)>)(?:\s+(?:\'((?:\\[\s\S]|[^\'])*?)\'|"((?:\\[\s\S]|[^"])*?)"|\(((?:\\[\s\S]|[^\)])*?)\)))?\s*\)/,
-    'referenceLink': /^(!?\[)((?:(?:\[(?:\[(?:\\[\s\S]|[^\[\]])*?\]|\\[\s\S]|[^\[\]])*?\])|\\[\s\S]|[^\[\]])*?)\]\s*\[((?:\\[\s\S]|[^\[\]])*)\]/,
-    'paragraph': /^(?:(?:[^\n]+\n?(?!\ {0,3}([-*_])( *\1){2,} *(?=\n|$)|(\ {0,3})(#{1,6})(\ {0,3})([^\n]*?)\ {0,3}#*\ {0,3}(?=\n|$)|(?=\ {0,3}>)(?:(?:(?:\ {0,3}>[^\n]*\n)*(?:\ {0,3}>[^\n]+(?=\n|$))|(?!\ {0,3}>)(?!\ {0,3}\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?\ {0,3}(?=\n|$))[^\n]+)(?:\n|$))*(?:\ {0,3}>\ {0,3}(?:\n\ {0,3}>\ {0,3})*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
-    'blockquote': /^(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|([ \t]*)((?:[*+-]|\d+\.))((?:[ \t][\s\S]+?)(?:\n+(?=\3?(?:[-*_][ \t]*){3,}(?:\n|$))|\n+(?=[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\3(?:[*+-]|\d+\.)[ \t])|\s*$))|( *)(([`~])\11{2,})[ \t]*([^\s`~]+)?[ \t]*(?:\n([\s\S]*?))??(?:\n\ {0,3}\10\11*[ \t]*(?=\n|$)|$)|((?: {4}|\t)[^\n]*\n?([ \t]*\n)*)+|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?/,
-    'escape': /^\\(\n|[\\`*{}\[\]()#+\-.!_>"$%&',/:;<=?@^~|])/
+    'reference': /^(!?\[)((?:(?:\[(?:\[(?:\\[\s\S]|[^\[\]])*?\]|\\[\s\S]|[^\[\]])*?\])|\\[\s\S]|[^\[\]])*?)\]\s*\[((?:\\[\s\S]|[^\[\]])*)\]/,
+    'paragraph': /^(?:(?:[^\n]+\n?(?!\ {0,3}([-*_])( *\1){2,} *(?=\n|$)|(\ {0,3})(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?\ {0,3}(?=\n|$)|(?=\ {0,3}>)(?:(?:(?:\ {0,3}>[^\n]*\n)*(?:\ {0,3}>[^\n]+(?=\n|$))|(?!\ {0,3}>)(?!\ {0,3}\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?\ {0,3}(?=\n|$))[^\n]+)(?:\n|$))*(?:\ {0,3}>\ {0,3}(?:\n\ {0,3}>\ {0,3})*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
+    'blockquote': /^(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|([ \t]*)((?:[*+-]|\d+\.))[ \t][\s\S]+?(?:(?=\n+\3?(?:[-*_][ \t]*){3,}(?:\n|$))|(?=\n+[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\3(?:[*+-]|\d+\.)[ \t])|$)|( *)(([`~])\10{2,})[ \t]*([^\n`~]+)?[ \t]*(?:\n([\s\S]*?))??(?:\n\ {0,3}\9\10*[ \t]*(?=\n|$)|$)|((?: {4}|\t)[^\n]*\n?([ \t]*\n)*)+|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?/,
+    'escape': /^\\(\n|[\\`*{}\[\]()#+\-.!_>"$%&',\/:;<=?@^~|])/
   },
   'commonmarkGFM': {
-    'paragraph': /^(?:(?:[^\n]+\n?(?!\ {0,3}([-*_])( *\1){2,} *(?=\n|$)|( *)(([`~])\5{2,})\ {0,3}([^\s`~]+)?\ {0,3}(?:\n([\s\S]*?))??(?:\n\ {0,3}\4\5*\ {0,3}(?=\n|$)|$)|(\ {0,3})((?:[*+-]|\d+\.))((?:[ \t][\s\S]+?)(?:\n+(?=\8?(?:[-*_]\ {0,3}){3,}(?:\n|$))|\n+(?=\ {0,3}\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?\ {0,3}(?=\n|$))|\n{2,}(?![ \t])(?!\8(?:[*+-]|\d+\.)[ \t])|\s*$))|(\ {0,3})(#{1,6})(\ {0,3})([^\n]*?)\ {0,3}#*\ {0,3}(?=\n|$)|(?=\ {0,3}>)(?:(?:(?:\ {0,3}>[^\n]*\n)*(?:\ {0,3}>[^\n]+(?=\n|$))|(?!\ {0,3}>)(?!\ {0,3}\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]([^\n]+)['")])?\ {0,3}(?=\n|$))[^\n]+)(?:\n|$))*(?:\ {0,3}>\ {0,3}(?:\n\ {0,3}>\ {0,3})*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)\w+(?!:\/|[^\w\s@]*@)\b))+)/
+    'paragraph': /^(?:(?:[^\n]+\n?(?!\ {0,3}([-*_])( *\1){2,} *(?=\n|$)|( *)(([`~])\5{2,})\ {0,3}([^\n`~]+)?\ {0,3}(?:\n([\s\S]*?))??(?:\n\ {0,3}\4\5*\ {0,3}(?=\n|$)|$)|(\ {0,3})((?:[*+-]|\d+\.))[ \t][\s\S]+?(?:(?=\n+\8?(?:[-*_]\ {0,3}){3,}(?:\n|$))|(?=\n+\ {0,3}\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?\ {0,3}(?=\n|$))|\n{2,}(?![ \t])(?!\8(?:[*+-]|\d+\.)[ \t])|$)|(\ {0,3})(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?\ {0,3}(?=\n|$)|(?=\ {0,3}>)(?:(?:(?:\ {0,3}>[^\n]*\n)*(?:\ {0,3}>[^\n]+(?=\n|$))|(?!\ {0,3}>)(?!\ {0,3}\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?\ {0,3}(?=\n|$))[^\n]+)(?:\n|$))*(?:\ {0,3}>\ {0,3}(?:\n\ {0,3}>\ {0,3})*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b))+)/
   },
   'breaks': {
     'break': /^ *\n(?!\s*$)/,
@@ -360,6 +487,372 @@ module.exports = {
 };
 
 },{}],5:[function(require,module,exports){
+/**
+ * @author Titus Wormer
+ * @copyright 2015 Titus Wormer. All rights reserved.
+ * @module File
+ * @fileoverview Virtual file format to attach additional
+ *   information related to the processed input.  Similar
+ *   to`wearefractal/vinyl`.  Additionally, File can be
+ *   passed directly to an ESLint formatter to visualise
+ *   warnings and errors relating to a file.
+ */
+
+'use strict';
+
+/**
+ * ESLint's formatter API expects `filePath` to be a
+ * string.  This hack supports invocation as well as
+ * implicit coercion.
+ *
+ * @example
+ *   var file = new File();
+ *   filePath = filePathFactory(file);
+ *
+ * @param {File} file
+ * @return {Function}
+ */
+function filePathFactory(file) {
+    /**
+     * Get the location of `file`.
+     *
+     * Returns empty string when without `filename`.
+     *
+     * @example
+     *   var file = new File({
+     *     'directory': '~',
+     *     'filename': 'example',
+     *     'extension': 'markdown'
+     *   });
+     *
+     *   String(file.filePath); // ~/example.markdown
+     *   file.filePath() // ~/example.markdown
+     *
+     * @property {Function} toString - Itself.
+     * @return {string}
+     */
+    function filePath() {
+        var directory;
+
+        if (file.filename) {
+            directory = file.directory;
+
+            if (directory.charAt(directory.length - 1) === '/') {
+                directory = directory.slice(0, -1);
+            }
+
+            if (directory === '.') {
+                directory = '';
+            }
+
+            return (directory ? directory + '/' : '') +
+                file.filename +
+                (file.extension ? '.' + file.extension : '');
+        }
+
+        return '';
+    }
+
+    filePath.toString = filePath;
+
+    return filePath;
+}
+
+/**
+ * Construct a new file.
+ *
+ * @example
+ *   var file = new File({
+ *     'directory': '~',
+ *     'filename': 'example',
+ *     'extension': 'markdown',
+ *     'contents': 'Foo *bar* baz'
+ *   });
+ *
+ *   file === File(file) // true
+ *   file === new File(file) // true
+ *   File('foo') instanceof File // true
+ *
+ * @constructor
+ * @class {File}
+ * @param {Object|File|string} [options] - either an
+ *   options object, or the value of `contents` (both
+ *   optional).  When a `file` is passed in, it's
+ *   immediately returned.
+ */
+function File(options) {
+    var self = this;
+
+    if (!(self instanceof File)) {
+        return new File(options);
+    }
+
+    if (options instanceof File) {
+        return options;
+    }
+
+    if (!options) {
+        options = {};
+    } else if (typeof options === 'string') {
+        options = {
+            'contents': options
+        };
+    }
+
+    self.filename = options.filename || null;
+    self.contents = options.contents || '';
+
+    self.directory = options.directory === undefined ? '' : options.directory;
+
+    self.extension = options.extension === undefined ?
+        'md' : options.extension;
+
+    self.messages = [];
+
+    /*
+     * Make sure eslint’s formatters stringify `filePath`
+     * properly.
+     */
+
+    self.filePath = filePathFactory(self);
+}
+
+/**
+ * Move a file by passing a new directory, filename,
+ * and extension.  When these are not given, the default
+ * values are kept.
+ *
+ * @example
+ *   var file = new File({
+ *     'directory': '~',
+ *     'filename': 'example',
+ *     'extension': 'markdown',
+ *     'contents': 'Foo *bar* baz'
+ *   });
+ *
+ *   file.move({'directory': '/var/www'});
+ *   file.filePath(); // '/var/www/example.markdown'
+ *
+ *   file.move({'extension': 'md'});
+ *   file.filePath(); // '/var/www/example.md'
+ *
+ * @this {File}
+ * @param {Object} options
+ */
+function move(options) {
+    var self = this;
+
+    if (!options) {
+        options = {};
+    }
+
+    self.directory = options.directory || self.directory || '';
+    self.filename = options.filename || self.filename || null;
+    self.extension = options.extension || self.extension || 'md';
+}
+
+/**
+ * Stringify a position.
+ *
+ * @example
+ *   stringify({'line': 1, 'column': 3}) // '1:3'
+ *   stringify({'line': 1}) // '1:1'
+ *   stringify({'column': 3}) // '1:3'
+ *   stringify() // '1:1'
+ *
+ * @param {Object?} [position] - Single position, like
+ *   those available at `node.position.start`.
+ * @return {string}
+ */
+function stringify(position) {
+    if (!position) {
+        position = {};
+    }
+
+    return (position.line || 1) + ':' + (position.column || 1);
+}
+
+/**
+ * Warn.
+ *
+ * Creates an exception (see `File#exception()`),
+ * sets `fatal: false`, and adds it to the file's
+ * `messages` list.
+ *
+ * @example
+ *   var file = new File();
+ *   file.warn('Something went wrong');
+ *
+ * @this {File}
+ * @param {string|Error} reason - Reason for warning.
+ * @param {Node|Location|Position} [position] - Location
+ *   of warning in file.
+ * @return {Error}
+ */
+function warn(reason, position) {
+    var err = this.exception(reason, position);
+
+    err.fatal = false;
+
+    this.messages.push(err);
+
+    return err;
+}
+
+/**
+ * Fail.
+ *
+ * Creates an exception (see `File#exception()`),
+ * sets `fatal: true`, adds it to the file's
+ * `messages` list.  If `quiet` is not true,
+ * throws the error.
+ *
+ * @example
+ *   var file = new File();
+ *   file.fail('Something went wrong'); // throws
+ *
+ * @this {File}
+ * @throws {Error} - When not `quiet: true`.
+ * @param {string|Error} reason - Reason for failure.
+ * @param {Node|Location|Position} [position] - Location
+ *   of failure in file.
+ * @return {Error} - Unless thrown, of course.
+ */
+function fail(reason, position) {
+    var err = this.exception(reason, position);
+
+    err.fatal = true;
+
+    this.messages.push(err);
+
+    if (!this.quiet) {
+        throw err;
+    }
+
+    return err;
+}
+
+/**
+ * Create a pretty exception with `reason` at `position`.
+ * When an error is passed in as `reason`, copies the
+ * stack.  This does not add a message to `messages`.
+ *
+ * @example
+ *   var file = new File();
+ *   var err = file.exception('Something went wrong');
+ *
+ * @this {File}
+ * @param {string|Error} reason - Reason for message.
+ * @param {Node|Location|Position} [position] - Location
+ *   of message in file.
+ * @return {Error} - An object including file information,
+ *   line and column indices.
+ */
+function exception(reason, position) {
+    var file = this.filePath();
+    var message = reason.message || reason;
+    var location;
+    var err;
+
+    /*
+     * Node / location / position.
+     */
+
+    if (position && position.position) {
+        position = position.position;
+    }
+
+    if (position && position.start) {
+        location = stringify(position.start) + '-' + stringify(position.end);
+        position = position.start;
+    } else {
+        location = stringify(position);
+    }
+
+    err = new Error(message);
+
+    err.name = (file ? file + ':' : '') + location;
+    err.file = file;
+    err.reason = message;
+    err.line = position ? position.line : null;
+    err.column = position ? position.column : null;
+
+    if (reason.stack) {
+        err.stack = reason.stack;
+    }
+
+    return err;
+}
+
+/**
+ * Check if `file` has a fatal message.
+ *
+ * @example
+ *   var file = new File();
+ *   file.quiet = true;
+ *   file.hasFailed; // false
+ *
+ *   file.fail('Something went wrong');
+ *   file.hasFailed; // true
+ *
+ * @this {File}
+ * @return {boolean}
+ */
+function hasFailed() {
+    var messages = this.messages;
+    var index = -1;
+    var length = messages.length;
+
+    while (++index < length) {
+        if (messages[index].fatal) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Create a string representation of `file`.
+ *
+ * @example
+ *   var file = new File('Foo');
+ *   String(file); // 'Foo'
+ *
+ * @this {File}
+ * @return {string} - value at the `contents` property
+ *   in context.
+ */
+function toString() {
+    return this.contents;
+}
+
+/*
+ * Methods.
+ */
+
+File.prototype.move = move;
+File.prototype.exception = exception;
+File.prototype.toString = toString;
+File.prototype.warn = warn;
+File.prototype.fail = fail;
+File.prototype.hasFailed = hasFailed;
+
+/*
+ * Expose.
+ */
+
+module.exports = File;
+
+},{}],6:[function(require,module,exports){
+/**
+ * @author Titus Wormer
+ * @copyright 2015 Titus Wormer. All rights reserved.
+ * @module Parse
+ * @fileoverview Parse a markdown document into an
+ *   abstract syntax tree.
+ */
+
 'use strict';
 
 /*
@@ -367,26 +860,28 @@ module.exports = {
  */
 
 var he = require('he');
+var repeat = require('repeat-string');
 var utilities = require('./utilities.js');
 var defaultExpressions = require('./expressions.js');
-var defaults = require('./defaults.js').parse;
+var defaultOptions = require('./defaults.js').parse;
 
 /*
- * Cached methods.
+ * Methods.
  */
 
-var repeat = utilities.repeat;
+var clone = utilities.clone;
 var copy = utilities.copy;
 var raise = utilities.raise;
 var trim = utilities.trim;
 var trimRightLines = utilities.trimRightLines;
 var clean = utilities.clean;
 var validate = utilities.validate;
-var normalize = utilities.normalizeReference;
-var has = Object.prototype.hasOwnProperty;
+var normalize = utilities.normalizeIdentifier;
+var objectCreate = utilities.create;
+var arrayPush = [].push;
 
 /*
- * Constants.
+ * Characters.
  */
 
 var AT_SIGN = '@';
@@ -395,12 +890,17 @@ var EQUALS = '=';
 var EXCLAMATION_MARK = '!';
 var MAILTO_PROTOCOL = 'mailto:';
 var NEW_LINE = '\n';
-var SLASH = '\\';
 var SPACE = ' ';
 var TAB = '\t';
 var EMPTY = '';
 var LT = '<';
 var GT = '>';
+var BRACKET_OPEN = '[';
+
+/*
+ * Types.
+ */
+
 var BLOCK = 'block';
 var INLINE = 'inline';
 var HORIZONTAL_RULE = 'horizontalRule';
@@ -430,22 +930,42 @@ var BREAK = 'break';
 var ROOT = 'root';
 
 /**
- * Wrapper arround he’s `decode` function.
+ * Wrapper around he's `decode` function.
+ *
+ * @example
+ *   decode('&amp;'); // '&'
+ *   decode('&amp'); // '&'
  *
  * @param {string} value
+ * @param {function(string)} eat
  * @return {string}
+ * @throws {Error} - When `eat.file.quiet` is not `true`.
+ *   However, by default `he` does not throw on incorrect
+ *   encoded entities, but when
+ *   `he.decode.options.strict: true`, they occur on
+ *   entities with a missing closing semi-colon.
  */
-function decode(value) {
-    return he.decode(value);
+function decode(value, eat) {
+    try {
+        return he.decode(value);
+    } catch (exception) {
+        eat.file.fail(exception, eat.now());
+    }
 }
 
 /**
  * Factory to de-escape a value, based on an expression
  * at `key` in `scope`.
  *
- * @param {Object} scope
- * @param {string} key
- * @return {function(string): string}
+ * @example
+ *   var expressions = {escape: /\\(a)/}
+ *   var descape = descapeFactory(expressions, 'escape');
+ *
+ * @param {Object} scope - Map of expressions.
+ * @param {string} key - Key in `map` at which the
+ *   non-global expression exists.
+ * @return {function(string): string} - Function which
+ *   takes a value and returns its unescaped version.
  */
 function descapeFactory(scope, key) {
     var globalExpression;
@@ -454,7 +974,10 @@ function descapeFactory(scope, key) {
     /**
      * Private method to get a global expression
      * from the expression at `key` in `scope`.
+     * This method is smart about not recreating
+     * the expressions every time.
      *
+     * @private
      * @return {RegExp}
      */
     function generate() {
@@ -469,14 +992,22 @@ function descapeFactory(scope, key) {
     }
 
     /**
-     * De-escape a string.
+     * De-escape a string using the expression at `key`
+     * in `scope`.
      *
-     * @param {string} value
-     * @return {string}
+     * @example
+     *   var expressions = {escape: /\\(a)/}
+     *   var descape = descapeFactory(expressions, 'escape');
+     *   descape('\a'); // 'a'
+     *
+     * @param {string} value - Escaped string.
+     * @return {string} - Unescaped string.
      */
-    return function (value) {
+    function descape(value) {
         return value.replace(generate(), '$1');
-    };
+    }
+
+    return descape;
 }
 
 /*
@@ -491,13 +1022,15 @@ var TAB_SIZE = 4;
 
 var EXPRESSION_RIGHT_ALIGNMENT = /^[ \t]*-+:[ \t]*$/;
 var EXPRESSION_CENTER_ALIGNMENT = /^[ \t]*:-+:[ \t]*$/;
+var EXPRESSION_LEFT_ALIGNMENT = /^[ \t]*:-+[ \t]*$/;
 var EXPRESSION_TABLE_FENCE = /^[ \t]*|\|[ \t]*$/g;
 var EXPRESSION_TABLE_INITIAL = /^[ \t]*\|[ \t]*/g;
-var EXPRESSION_TABLE_CONTENT = /([\s\S]+?)([ \t]*\|[ \t]*\n?|\n?$)/g;
+var EXPRESSION_TABLE_CONTENT =
+    /((?:\\[\s\S]|[^\|])+?)([ \t]?\|[ \t]?\n?|\n?$)/g;
 var EXPRESSION_TABLE_BORDER = /[ \t]*\|[ \t]*/;
 var EXPRESSION_BLOCK_QUOTE = /^[ \t]*>[ \t]?/gm;
-var EXPRESSION_BULLET = /^([ \t]*)([*+-]|\d+\.)([ \t]+)([^\n]*)/;
-var EXPRESSION_PEDANTIC_BULLET = /^([ \t]*)([*+-]|\d+\.)([ \t]+)/;
+var EXPRESSION_BULLET = /^([ \t]*)([*+-]|\d+[.)])( {1,4}(?! )| |\t)([^\n]*)/;
+var EXPRESSION_PEDANTIC_BULLET = /^([ \t]*)([*+-]|\d+[.)])([ \t]+)/;
 var EXPRESSION_INITIAL_INDENT = /^( {1,4}|\t)?/gm;
 var EXPRESSION_INITIAL_TAB = /^( {4}|\t)?/gm;
 var EXPRESSION_HTML_LINK_OPEN = /^<a /i;
@@ -507,18 +1040,31 @@ var EXPRESSION_TASK_ITEM = /^\[([\ \t]|x|X)\][\ \t]/;
 
 /*
  * A map of characters, and their column length,
- * which can be used as indentation
+ * which can be used as indentation.
  */
 
-var INDENTATION_CHARACTERS = {};
+var INDENTATION_CHARACTERS = objectCreate();
 
 INDENTATION_CHARACTERS[SPACE] = SPACE.length;
 INDENTATION_CHARACTERS[TAB] = TAB_SIZE;
 
 /**
- * Gets column-size of the indentation.
+ * Gets indentation information for a line.
  *
- * @param {string} value
+ * @example
+ *   getIndent('  foo');
+ *   // {indent: 2, stops: {1: 0, 2: 1}}
+ *
+ *   getIndent('\tfoo');
+ *   // {indent: 4, stops: {4: 0}}
+ *
+ *   getIndent('  \tfoo');
+ *   // {indent: 4, stops: {1: 0, 2: 1, 4: 2}}
+ *
+ *   getIndent('\t  foo')
+ *   // {indent: 6, stops: {4: 0, 5: 1, 6: 2}}
+ *
+ * @param {string} value - Indented line.
  * @return {Object}
  */
 function getIndent(value) {
@@ -549,16 +1095,24 @@ function getIndent(value) {
 }
 
 /**
- * Remove the minimum indent from `value`.
+ * Remove the minimum indent from every line in `value`.
+ * Supports both tab, spaced, and mixed indentation (as
+ * well as possible).
+ *
+ * @example
+ *   removeIndentation('  foo'); // 'foo'
+ *   removeIndentation('    foo', 2); // '  foo'
+ *   removeIndentation('\tfoo', 2); // '  foo'
+ *   removeIndentation('  foo\n bar'); // ' foo\n bar'
  *
  * @param {string} value
- * @param {number?} maximum - The maximum indentation
+ * @param {number?} [maximum] - Maximum indentation
  *   to remove.
- * @return {string}
+ * @return {string} - Unindented `value`.
  */
 function removeIndentation(value, maximum) {
     var values = value.split(NEW_LINE);
-    var position = values.length;
+    var position = values.length + 1;
     var minIndent = Infinity;
     var matrix = [];
     var index;
@@ -566,10 +1120,7 @@ function removeIndentation(value, maximum) {
     var stops;
     var padding;
 
-    if (maximum > 0) {
-        values.unshift(repeat(maximum, SPACE) + EXCLAMATION_MARK);
-        position++;
-    }
+    values.unshift(repeat(SPACE, maximum) + EXCLAMATION_MARK);
 
     while (position--) {
         indentation = getIndent(values[position]);
@@ -589,11 +1140,6 @@ function removeIndentation(value, maximum) {
 
             break;
         }
-    }
-
-    if (maximum > 0) {
-        values.shift();
-        position--;
     }
 
     if (minIndent !== Infinity) {
@@ -623,17 +1169,24 @@ function removeIndentation(value, maximum) {
         }
     }
 
+    values.shift();
+
     return values.join(NEW_LINE);
 }
 
 /**
  * Ensure that `value` is at least indented with
- * `indent` spaces.
+ * `indent` spaces.  Does not support tabs. Does support
+ * multiple lines.
+ *
+ * @example
+ *   ensureIndentation('foo', 2); // '  foo'
+ *   ensureIndentation('  foo', 4); // '    foo'
  *
  * @param {string} value
  * @param {number} indent - The maximum amount of
  *   spacing to insert.
- * @return {string}
+ * @return {string} - indented `value`.
  */
 function ensureIndentation(value, indent) {
     var values = value.split(NEW_LINE);
@@ -649,7 +1202,7 @@ function ensureIndentation(value, indent) {
 
         while (++position < indent) {
             if (line.charAt(position) !== SPACE) {
-                values[index] = repeat(indent - position, SPACE) + line;
+                values[index] = repeat(SPACE, indent - position) + line;
                 break;
             }
         }
@@ -661,68 +1214,145 @@ function ensureIndentation(value, indent) {
 /**
  * Get the alignment from a table rule.
  *
- * @param {Array.<Array.<Object>>} rows
- * @return {Array.<string>}
+ * @example
+ *   getAlignment([':-', ':-:', '-:', '--']);
+ *   // ['left', 'center', 'right', null];
+ *
+ * @param {Array.<string>} cells
+ * @return {Array.<string?>}
  */
-function getAlignment(rows) {
+function getAlignment(cells) {
     var results = [];
     var index = -1;
-    var length = rows.length;
+    var length = cells.length;
     var alignment;
 
     while (++index < length) {
-        alignment = rows[index];
+        alignment = cells[index];
 
         if (EXPRESSION_RIGHT_ALIGNMENT.test(alignment)) {
             results[index] = 'right';
         } else if (EXPRESSION_CENTER_ALIGNMENT.test(alignment)) {
             results[index] = 'center';
-        } else {
+        } else if (EXPRESSION_LEFT_ALIGNMENT.test(alignment)) {
             results[index] = 'left';
+        } else {
+            results[index] = null;
         }
     }
 
     return results;
 }
 
+/**
+ * Construct a state `toggler`: a function which inverses
+ * `property` in context based on its current value.
+ * The by `toggler` returned function restores that value.
+ *
+ * @example
+ *   var context = {};
+ *   var key = 'foo';
+ *   var val = true;
+ *   context[key] = val;
+ *   context.enter = stateToggler(key, val);
+ *   context[key]; // true
+ *   var exit = context.enter();
+ *   context[key]; // false
+ *   var nested = context.enter();
+ *   context[key]; // false
+ *   nested();
+ *   context[key]; // false
+ *   exit();
+ *   context[key]; // true
+ *
+ * @param {string} key - Property to toggle.
+ * @param {boolean} state - It's default state.
+ * @return {function(): function()} - Enter.
+ */
+function stateToggler(key, state) {
+    /**
+     * Construct a toggler for the bound `key`.
+     *
+     * @return {Function} - Exit state.
+     */
+    function enter() {
+        var self = this;
+        var current = self[key];
+
+        self[key] = !state;
+
+        /**
+         * State canceler, cancels the state, if allowed.
+         */
+        function exit() {
+            self[key] = current;
+        }
+
+        return exit;
+    }
+
+    return enter;
+}
+
+/**
+ * Construct a state toggler which doesn't toggle.
+ *
+ * @example
+ *   var context = {};
+ *   var key = 'foo';
+ *   var val = true;
+ *   context[key] = val;
+ *   context.enter = noopToggler();
+ *   context[key]; // true
+ *   var exit = context.enter();
+ *   context[key]; // true
+ *   exit();
+ *   context[key]; // true
+ *
+ * @return {function(): function()} - Enter.
+ */
+function noopToggler() {
+    /**
+     * No-operation.
+     */
+    function exit() {}
+
+    /**
+     * @return {Function}
+     */
+    function enter() {
+        return exit;
+    }
+
+    return enter;
+}
+
 /*
  * Define nodes of a type which can be merged.
  */
 
-var MERGEABLE_NODES = {};
-
-/**
- * Merge two HTML nodes: `token` into `prev`.
- *
- * @param {Object} prev
- * @param {Object} token
- * @return {Object} `prev`.
- */
-MERGEABLE_NODES.html = function (prev, token) {
-    prev.value += NEW_LINE + NEW_LINE + token.value;
-
-    return prev;
-};
+var MERGEABLE_NODES = objectCreate();
 
 /**
  * Merge two text nodes: `token` into `prev`.
  *
- * @param {Object} prev
- * @param {Object} token
- * @return {Object} `prev`.
+ * @param {Object} prev - Preceding sibling.
+ * @param {Object} token - Following sibling.
+ * @return {Object} - `prev`.
  */
-MERGEABLE_NODES.text = function (prev, token, type) {
-    prev.value += (type === BLOCK ? NEW_LINE : EMPTY) + token.value;
+MERGEABLE_NODES.text = function (prev, token) {
+    prev.value += token.value;
 
     return prev;
 };
 
 /**
- * Merge two blockquotes: `token` into `prev`.
+ * Merge two blockquotes: `token` into `prev`, unless in
+ * CommonMark mode.
  *
- * @param {Object} prev
- * @param {Object} token
- * @return {Object} `prev`.
+ * @param {Object} prev - Preceding sibling.
+ * @param {Object} token - Following sibling.
+ * @return {Object} - `prev`, or `token` in CommonMark mode.
  */
 MERGEABLE_NODES.blockquote = function (prev, token) {
     if (this.options.commonmark) {
@@ -735,29 +1365,73 @@ MERGEABLE_NODES.blockquote = function (prev, token) {
 };
 
 /**
- * Tokenise a line.
+ * Merge two lists: `token` into `prev`. Knows, about
+ * which bullets were used.
+ *
+ * @param {Object} prev - Preceding sibling.
+ * @param {Object} token - Following sibling.
+ * @return {Object} - `prev`, or `token` when the lists are
+ *   of different types (a different bullet is used).
+ */
+MERGEABLE_NODES.list = function (prev, token) {
+    if (
+        !this.currentBullet ||
+        this.currentBullet !== this.previousBullet ||
+        this.currentBullet.length !== 1
+    ) {
+        return token;
+    }
+
+    prev.children = prev.children.concat(token.children);
+
+    return prev;
+};
+
+/**
+ * Tokenise a line.  Unsets `currentBullet` and
+ * `previousBullet` if more than one lines are found, thus
+ * preventing lists from merging when they use different
+ * bullets.
+ *
+ * @example
+ *   tokenizeNewline(eat, '\n\n');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Lines.
  */
 function tokenizeNewline(eat, $0) {
+    if ($0.length > 1) {
+        this.currentBullet = null;
+        this.previousBullet = null;
+    }
+
     eat($0);
 }
 
 /**
- * Tokenise a code block.
+ * Tokenise an indented code block.
+ *
+ * @example
+ *   tokenizeCode(eat, '\tfoo');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole code.
+ * @return {Node} - `code` node.
  */
 function tokenizeCode(eat, $0) {
     $0 = trimRightLines($0);
 
-    eat($0)(this.renderCodeBlock(removeIndentation($0)));
+    return eat($0)(this.renderCodeBlock(
+        removeIndentation($0, TAB_SIZE), null, eat)
+    );
 }
 
 /**
  * Tokenise a fenced code block.
+ *
+ * @example
+ *   var $0 = '```js\nfoo()\n```';
+ *   tokenizeFences(eat, $0, '', '```', '`', 'js', 'foo()\n');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole code.
@@ -766,6 +1440,7 @@ function tokenizeCode(eat, $0) {
  * @param {string} $3 - Fence marker.
  * @param {string} $4 - Programming language flag.
  * @param {string} $5 - Content.
+ * @return {Node} - `code` node.
  */
 function tokenizeFences(eat, $0, $1, $2, $3, $4, $5) {
     $0 = trimRightLines($0);
@@ -773,7 +1448,7 @@ function tokenizeFences(eat, $0, $1, $2, $3, $4, $5) {
     /*
      * If the initial fence was preceded by spaces,
      * exdent that amount of white space from the code
-     * block.  Because it’s possible that the code block
+     * block.  Because it's possible that the code block
      * is exdented, we first have to ensure at least
      * those spaces are available.
      */
@@ -782,11 +1457,14 @@ function tokenizeFences(eat, $0, $1, $2, $3, $4, $5) {
         $5 = removeIndentation(ensureIndentation($5, $1.length), $1.length);
     }
 
-    eat($0)(this.renderCodeBlock($5, $4));
+    return eat($0)(this.renderCodeBlock($5, $4, eat));
 }
 
 /**
  * Tokenise an ATX-style heading.
+ *
+ * @example
+ *   tokenizeHeading(eat, ' # foo', ' ', '#', ' ', 'foo');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole heading.
@@ -794,76 +1472,106 @@ function tokenizeFences(eat, $0, $1, $2, $3, $4, $5) {
  * @param {string} $2 - Hashes.
  * @param {string} $3 - Internal spacing.
  * @param {string} $4 - Content.
+ * @return {Node} - `heading` node.
  */
 function tokenizeHeading(eat, $0, $1, $2, $3, $4) {
-    var offset = this.offset;
-    var line = eat.now().line;
-    var prefix = $1 + $2 + $3;
+    var now = eat.now();
 
-    offset[line] = (offset[line] || 0) + prefix.length;
+    now.column += ($1 + $2 + ($3 || '')).length;
 
-    eat($0)(this.renderHeading($4, $2.length));
+    return eat($0)(this.renderHeading($4, $2.length, now));
 }
 
 /**
  * Tokenise a Setext-style heading.
+ *
+ * @example
+ *   tokenizeLineHeading(eat, 'foo\n===', '', 'foo', '=');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole heading.
  * @param {string} $1 - Initial spacing.
  * @param {string} $2 - Content.
  * @param {string} $3 - Underline marker.
+ * @return {Node} - `heading` node.
  */
 function tokenizeLineHeading(eat, $0, $1, $2, $3) {
-    eat($1);
-    eat($0)(this.renderHeading($2, $3 === EQUALS ? 1 : 2));
+    var now = eat.now();
+
+    now.column += $1.length;
+
+    return eat($0)(this.renderHeading($2, $3 === EQUALS ? 1 : 2, now));
 }
 
 /**
  * Tokenise a horizontal rule.
  *
+ * @example
+ *   tokenizeHorizontalRule(eat, '***');
+ *
  * @param {function(string)} eat
  * @param {string} $0 - Whole rule.
+ * @return {Node} - `horizontalRule` node.
  */
 function tokenizeHorizontalRule(eat, $0) {
-    eat($0)(this.renderVoid(HORIZONTAL_RULE));
+    return eat($0)(this.renderVoid(HORIZONTAL_RULE));
 }
 
 /**
  * Tokenise a blockquote.
  *
+ * @example
+ *   tokenizeBlockquote(eat, '> Foo');
+ *
  * @param {function(string)} eat
  * @param {string} $0 - Whole blockquote.
+ * @return {Node} - `blockquote` node.
  */
 function tokenizeBlockquote(eat, $0) {
     var now = eat.now();
+    var indent = this.indent(now.line);
+    var value = trimRightLines($0);
+    var add = eat(value);
 
-    $0 = trimRightLines($0);
+    value = value.replace(EXPRESSION_BLOCK_QUOTE, function (prefix) {
+        indent(prefix.length);
 
-    eat($0)(this.renderBlockquote($0, now));
+        return '';
+    });
+
+    return add(this.renderBlockquote(value, now));
 }
 
 /**
  * Tokenise a list.
  *
+ * @example
+ *   tokenizeList(eat, '- Foo', '', '-');
+ *
  * @param {function(string)} eat
  * @param {string} $0 - Whole list.
  * @param {string} $1 - Indent.
  * @param {string} $2 - Bullet.
+ * @return {Node} - `list` node.
  */
 function tokenizeList(eat, $0, $1, $2) {
     var self = this;
     var firstBullet = $2;
-    var matches = trimRightLines($0).match(self.rules.item);
+    var value = trimRightLines($0);
+    var matches = value.match(self.rules.item);
     var length = matches.length;
-    var index = -1;
+    var index = 0;
+    var isLoose = false;
     var now;
     var bullet;
-    var add;
     var item;
     var enterTop;
     var exitBlockquote;
-    var list;
+    var node;
+    var indent;
+    var size;
+    var position;
+    var end;
 
     /*
      * Determine if all list-items belong to the
@@ -876,12 +1584,15 @@ function tokenizeList(eat, $0, $1, $2) {
 
             if (
                 firstBullet !== bullet &&
-                !(
-                    firstBullet.length > 1 &&
-                    bullet.length > 1
+                (
+                    firstBullet.length === 1 && bullet.length === 1 ||
+                    bullet.charAt(bullet.length - 1) !==
+                    firstBullet.charAt(firstBullet.length - 1)
                 )
             ) {
                 matches = matches.slice(0, index);
+                matches[index - 1] = trimRightLines(matches[index - 1]);
+
                 length = matches.length;
 
                 break;
@@ -889,46 +1600,94 @@ function tokenizeList(eat, $0, $1, $2) {
         }
     }
 
+    if (self.options.commonmark) {
+        index = -1;
+
+        while (++index < length) {
+            item = matches[index];
+            indent = self.rules.indent.exec(item);
+            indent = indent[1] + repeat(SPACE, indent[2].length) + indent[3];
+            size = getIndent(indent).indent;
+            position = indent.length;
+            end = item.length;
+
+            while (++position < end) {
+                if (
+                    item.charAt(position) === NEW_LINE &&
+                    item.charAt(position - 1) === NEW_LINE &&
+                    getIndent(item.slice(position + 1)).indent < size
+                ) {
+                    matches[index] = item.slice(0, position - 1);
+
+                    matches = matches.slice(0, index + 1);
+                    length = matches.length;
+
+                    break;
+                }
+            }
+        }
+    }
+
+    self.previousBullet = self.currentBullet;
+    self.currentBullet = firstBullet;
+
     index = -1;
 
-    add = eat(EMPTY);
+    node = eat(matches.join(NEW_LINE)).reset(
+        self.renderList([], firstBullet)
+    );
 
     enterTop = self.exitTop();
     exitBlockquote = self.enterBlockquote();
-
-    list = add(self.renderList([], firstBullet.length > 1));
 
     while (++index < length) {
         item = matches[index];
         now = eat.now();
 
-        item = eat(item)(list, self.renderListItem(item, now));
+        item = eat(item)(self.renderListItem(item, now), node);
+
+        if (item.loose) {
+            isLoose = true;
+        }
 
         if (index !== length - 1) {
             eat(NEW_LINE);
         }
     }
 
-    list.position.end = eat.now();
+    node.loose = isLoose;
 
     enterTop();
     exitBlockquote();
+
+    return node;
 }
 
 /**
- * Tokenise a link definition.
+ * Tokenise HTML.
+ *
+ * @example
+ *   tokenizeHtml(eat, '<span>foo</span>');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole HTML.
+ * @return {Node} - `html` node.
  */
 function tokenizeHtml(eat, $0) {
     $0 = trimRightLines($0);
 
-    eat($0)(this.renderRaw(HTML, $0));
+    return eat($0)(this.renderRaw(HTML, $0));
 }
 
 /**
- * Tokenise a link definition.
+ * Tokenise a definition.
+ *
+ * @example
+ *   var $0 = '[foo]: http://example.com "Example Domain"';
+ *   var $1 = 'foo';
+ *   var $2 = 'http://example.com';
+ *   var $3 = 'Example Domain';
+ *   tokenizeDefinition(eat, $0, $1, $2, $3);
  *
  * @property {boolean} onlyAtTop
  * @property {boolean} notInBlockquote
@@ -937,41 +1696,59 @@ function tokenizeHtml(eat, $0) {
  * @param {string} $1 - Key.
  * @param {string} $2 - URL.
  * @param {string} $3 - Title.
+ * @return {Node} - `definition` node.
  */
-function tokenizeLinkDefinition(eat, $0, $1, $2, $3) {
-    var identifier = normalize($1);
-    var add = eat($0);
+function tokenizeDefinition(eat, $0, $1, $2, $3) {
+    var link = $2;
 
-    if (!has.call(this.links, identifier)) {
-        if ($2.charAt(0) === LT && $2.charAt($2.length - 1) === GT) {
-            $2 = $2.slice(1, -1);
-        }
+    /*
+     * Remove angle-brackets from `link`.
+     */
 
-        this.links[identifier] = add({}, this.renderLink(
-            true, this.descape($2), null, $3
-        ));
+    if (link.charAt(0) === LT && link.charAt(link.length - 1) === GT) {
+        link = link.slice(1, -1);
     }
+
+    return eat($0)({
+        'type': 'definition',
+        'identifier': normalize($1),
+        'title': $3 ? decode(this.descape($3), eat) : null,
+        'link': decode(this.descape(link), eat)
+    });
 }
 
-tokenizeLinkDefinition.onlyAtTop = true;
-tokenizeLinkDefinition.notInBlockquote = true;
+tokenizeDefinition.onlyAtTop = true;
+tokenizeDefinition.notInBlockquote = true;
 
 /**
  * Tokenise YAML front matter.
+ *
+ * @example
+ *   var $0 = '---\nfoo: bar\n---';
+ *   var $1 = 'foo: bar';
+ *   tokenizeYAMLFrontMatter(eat, $0, $1);
  *
  * @property {boolean} onlyAtStart
  * @param {function(string)} eat
  * @param {string} $0 - Whole front matter.
  * @param {string} $1 - Content.
+ * @return {Node} - `yaml` node.
  */
 function tokenizeYAMLFrontMatter(eat, $0, $1) {
-    eat($0)(this.renderRaw(YAML, $1 ? trimRightLines($1) : EMPTY));
+    return eat($0)(this.renderRaw(YAML, $1 ? trimRightLines($1) : EMPTY));
 }
 
 tokenizeYAMLFrontMatter.onlyAtStart = true;
 
 /**
  * Tokenise a footnote definition.
+ *
+ * @example
+ *   var $0 = '[foo]: Bar.';
+ *   var $1 = '[foo]';
+ *   var $2 = 'foo';
+ *   var $3 = 'Bar.';
+ *   tokenizeFootnoteDefinition(eat, $0, $1, $2, $3);
  *
  * @property {boolean} onlyAtTop
  * @property {boolean} notInBlockquote
@@ -980,28 +1757,22 @@ tokenizeYAMLFrontMatter.onlyAtStart = true;
  * @param {string} $1 - Whole key.
  * @param {string} $2 - Key.
  * @param {string} $3 - Whole value.
+ * @return {Node} - `footnoteDefinition` node.
  */
 function tokenizeFootnoteDefinition(eat, $0, $1, $2, $3) {
     var self = this;
     var now = eat.now();
-    var line = now.line;
-    var offset = self.offset;
-    var token;
+    var indent = self.indent(now.line);
 
     $3 = $3.replace(EXPRESSION_INITIAL_TAB, function (value) {
-        offset[line] = (offset[line] || 0) + value.length;
-        line++;
+        indent(value.length);
 
         return EMPTY;
     });
 
     now.column += $1.length;
 
-    token = eat($0)({},
-        self.renderFootnoteDefinition($2.toLowerCase(), $3, now
-    ));
-
-    self.footnotes[token.id] = token;
+    return eat($0)(self.renderFootnoteDefinition(normalize($2), $3, now));
 }
 
 tokenizeFootnoteDefinition.onlyAtTop = true;
@@ -1009,6 +1780,15 @@ tokenizeFootnoteDefinition.notInBlockquote = true;
 
 /**
  * Tokenise a table.
+ *
+ * @example
+ *   var $0 = ' | foo |\n | --- |\n | bar |';
+ *   var $1 = ' | foo |';
+ *   var $2 = '| foo |';
+ *   var $3 = ' | --- |';
+ *   var $4 = '| --- |';
+ *   var $5 = ' | bar |';
+ *   tokenizeTable(eat, $0, $1, $2, $3, $4, $5);
  *
  * @property {boolean} onlyAtTop
  * @param {function(string)} eat
@@ -1018,25 +1798,29 @@ tokenizeFootnoteDefinition.notInBlockquote = true;
  * @param {string} $3 - Whole alignment.
  * @param {string} $4 - Trimmed alignment.
  * @param {string} $5 - Rows.
+ * @return {Node} - `table` node.
  */
 function tokenizeTable(eat, $0, $1, $2, $3, $4, $5) {
     var self = this;
-    var table;
+    var now;
+    var node;
     var index;
     var length;
-    var queue;
 
-    table = eat(EMPTY)({
+    $0 = trimRightLines($0);
+
+    node = eat($0).reset({
         'type': TABLE,
         'align': [],
         'children': []
     });
 
     /**
-     * Eat a fence.
+     * Eat a fence.  Returns an empty string so it can be
+     * passed to `String#replace()`.
      *
-     * @param {string} value
-     * @return {string} - Empty.
+     * @param {string} value - Fence.
+     * @return {string} - Empty string.
      */
     function eatFence(value) {
         eat(value);
@@ -1047,77 +1831,48 @@ function tokenizeTable(eat, $0, $1, $2, $3, $4, $5) {
     /**
      * Factory to eat a cell to a bound `row`.
      *
-     * @param {Object} row
-     * @return {Function}
+     * @param {Object} row - Parent to add cells to.
+     * @return {Function} - `eatCell` bound to `row`.
      */
     function eatCellFactory(row) {
         /**
-         * Eat a cell.
+         * Eat a cell.  Returns an empty string so it can be
+         * passed to `String#replace()`.
          *
-         * @param {string} value
-         * @param {string} content
-         * @param {string} pipe
-         * @return {string} - Empty.
+         * @param {string} value - Complete match.
+         * @param {string} content - Cell content.
+         * @param {string} pipe - Fence.
+         * @return {string} - Empty string.
          */
-        return function (value, content, pipe, pos, input) {
-            var lastIndex = content.length;
+        function eatCell(value, content, pipe) {
+            now = eat.now();
 
-            /*
-             * Support escaped pipes in table cells.
-             */
-
-            while (lastIndex--) {
-                if (content.charAt(lastIndex) !== SLASH) {
-                    break;
-                }
-
-                if (content.charAt(--lastIndex) !== SLASH) {
-                    /*
-                     * Escaped pipe, add it to normal
-                     * content, or, queue it for the
-                     * next cell.
-                     */
-
-                    if (pos + content.length + 1 === input.length) {
-                        content += pipe;
-                        pipe = EMPTY;
-
-                        break;
-                    } else {
-                        queue = content + pipe;
-
-                        return content + pipe;
-                    }
-                }
-            }
-
-            if (queue) {
-                content = queue + content;
-                queue = EMPTY;
-            }
-
-            eat(content)(row, self.renderBlock(TABLE_CELL, content));
+            eat(content)(self.renderInline(
+                TABLE_CELL, content.trim(), now
+            ), row);
 
             eat(pipe);
 
             return EMPTY;
-        };
+        }
+
+        return eatCell;
     }
 
     /**
      * Eat a row of type `type`.
      *
-     * @param {string} type
-     * @param {string} value
+     * @param {string} type - Type of the returned node,
+     *   such as `tableHeader` or `tableRow`.
+     * @param {string} value - Row, including initial and
+     *   final fences.
      */
     function renderRow(type, value) {
-        var row = eat(EMPTY)(table, self.renderBlock(type, []));
+        var row = eat(value).reset(self.renderParent(type, []), node);
 
         value
             .replace(EXPRESSION_TABLE_INITIAL, eatFence)
             .replace(EXPRESSION_TABLE_CONTENT, eatCellFactory(row));
-
-        row.position.end = eat.now();
     }
 
     /*
@@ -1138,7 +1893,7 @@ function tokenizeTable(eat, $0, $1, $2, $3, $4, $5) {
         .replace(EXPRESSION_TABLE_FENCE, EMPTY)
         .split(EXPRESSION_TABLE_BORDER);
 
-    table.align = getAlignment($4);
+    node.align = getAlignment($4);
 
     /*
      * Add the table rows to table's children.
@@ -1157,7 +1912,7 @@ function tokenizeTable(eat, $0, $1, $2, $3, $4, $5) {
         }
     }
 
-    table.position.end = eat.now();
+    return node;
 }
 
 tokenizeTable.onlyAtTop = true;
@@ -1165,45 +1920,57 @@ tokenizeTable.onlyAtTop = true;
 /**
  * Tokenise a paragraph token.
  *
- * @property {boolean} onlyAtTop
+ * @example
+ *   tokenizeParagraph(eat, 'Foo.');
+ *
  * @param {function(string)} eat
- * @param {string} $0
+ * @param {string} $0 - Whole paragraph.
+ * @return {Node?} - `paragraph` node, when the node does
+ *   not just contain white space.
  */
 function tokenizeParagraph(eat, $0) {
+    var now = eat.now();
+
     if (trim($0) === EMPTY) {
         eat($0);
 
-        return;
+        return null;
     }
 
     $0 = trimRightLines($0);
 
-    eat($0)(this.renderBlock(PARAGRAPH, $0));
+    return eat($0)(this.renderInline(PARAGRAPH, $0, now));
 }
-
-tokenizeParagraph.onlyAtTop = true;
 
 /**
  * Tokenise a text token.
  *
+ * @example
+ *   tokenizeText(eat, 'foo');
+ *
  * @param {function(string)} eat
- * @param {string} $0
+ * @param {string} $0 - Whole text.
+ * @return {Node} - `text` node.
  */
 function tokenizeText(eat, $0) {
-    eat($0)(this.renderRaw(TEXT, $0));
+    return eat($0)(this.renderRaw(TEXT, $0));
 }
 
 /**
  * Create a code-block token.
  *
- * @param {string?} value
- * @param {string?} language
- * @return {Object}
+ * @example
+ *   renderCodeBlock('foo()', 'js', now());
+ *
+ * @param {string?} [value] - Code.
+ * @param {string?} [language] - Optional language flag.
+ * @param {Function} eat
+ * @return {Object} - `code` node.
  */
-function renderCodeBlock(value, language) {
+function renderCodeBlock(value, language, eat) {
     return {
         'type': CODE,
-        'lang': language ? decode(this.descape(language)) : null,
+        'lang': language ? decode(this.descape(language), eat) : null,
         'value': trimRightLines(value || EMPTY)
     };
 }
@@ -1211,29 +1978,47 @@ function renderCodeBlock(value, language) {
 /**
  * Create a list token.
  *
- * @param {string} children
- * @param {boolean} ordered
- * @return {Object}
+ * @example
+ *   var children = [renderListItem('- foo')];
+ *   renderList(children, '-');
+ *
+ * @param {string} children - Children.
+ * @param {string} bullet - First bullet.
+ * @return {Object} - `list` node.
  */
-function renderList(children, ordered) {
+function renderList(children, bullet) {
+    var start = parseInt(bullet, 10);
+
+    if (start !== start) {
+        start = null;
+    }
+
+    /*
+     * `loose` should be added later.
+     */
+
     return {
         'type': LIST,
-        'ordered': ordered,
+        'ordered': bullet.length > 1,
+        'start': start,
+        'loose': null,
         'children': children
     };
 }
 
 /**
- * Create a list-item using lacks behaviour.
+ * Create a list-item using overly simple mechanics.
  *
- * @param {string} token
- * @param {Object} position
- * @return {Object}
+ * @example
+ *   renderPedanticListItem('- _foo_', now());
+ *
+ * @param {string} value - List-item.
+ * @param {Object} position - List-item location.
+ * @return {string} - Cleaned `value`.
  */
-function renderPedanticListItem(token, position) {
+function renderPedanticListItem(value, position) {
     var self = this;
-    var offset = self.offset;
-    var line = position.line;
+    var indent = self.indent(position.line);
 
     /**
      * A simple replacer which removed all matches,
@@ -1243,51 +2028,53 @@ function renderPedanticListItem(token, position) {
      * @return {string}
      */
     function replacer($0) {
-        offset[line] = (offset[line] || 0) + $0.length;
-        line++;
+        indent($0.length);
 
         return EMPTY;
     }
 
     /*
-     * Remove the list token's bullet.
+     * Remove the list-item's bullet.
      */
 
-    token = token.replace(EXPRESSION_PEDANTIC_BULLET, replacer);
+    value = value.replace(EXPRESSION_PEDANTIC_BULLET, replacer);
 
     /*
-     * The initial line is also matched by the below, so
+     * The initial line was also matched by the below, so
      * we reset the `line`.
      */
 
-    line = position.line;
+    indent = self.indent(position.line);
 
-    return token.replace(EXPRESSION_INITIAL_INDENT, replacer);
+    return value.replace(EXPRESSION_INITIAL_INDENT, replacer);
 }
 
 /**
- * Create a list-item using sane behaviour.
+ * Create a list-item using sane mechanics.
  *
- * @param {string} token
- * @param {Object} position
- * @return {Object}
+ * @example
+ *   renderNormalListItem('- _foo_', now());
+ *
+ * @param {string} value - List-item.
+ * @param {Object} position - List-item location.
+ * @return {string} - Cleaned `value`.
  */
-function renderNormalListItem(token, position) {
+function renderNormalListItem(value, position) {
     var self = this;
-    var offset = self.offset;
-    var line = position.line;
+    var indent = self.indent(position.line);
     var bullet;
     var rest;
     var lines;
     var trimmedLines;
     var index;
     var length;
+    var max;
 
     /*
-     * Remove the list token's bullet.
+     * Remove the list-item's bullet.
      */
 
-    token = token.replace(EXPRESSION_BULLET, function ($0, $1, $2, $3, $4) {
+    value = value.replace(EXPRESSION_BULLET, function ($0, $1, $2, $3, $4) {
         bullet = $1 + $2 + $3;
         rest = $4;
 
@@ -1301,11 +2088,16 @@ function renderNormalListItem(token, position) {
             $2 = SPACE + $2;
         }
 
-        return $1 + repeat($2.length, SPACE) + $3 + rest;
+        max = $1 + repeat(SPACE, $2.length) + $3;
+
+        return max + rest;
     });
 
-    lines = token.split(NEW_LINE);
-    trimmedLines = removeIndentation(token).split(NEW_LINE);
+    lines = value.split(NEW_LINE);
+
+    trimmedLines = removeIndentation(
+        value, getIndent(max).indent
+    ).split(NEW_LINE);
 
     /*
      * We replaced the initial bullet with something
@@ -1318,17 +2110,13 @@ function renderNormalListItem(token, position) {
 
     trimmedLines[0] = rest;
 
-    offset[line] = (offset[line] || 0) + bullet.length;
-    line++;
+    indent(bullet.length);
 
     index = 0;
     length = lines.length;
 
     while (++index < length) {
-        offset[line] = (offset[line] || 0) +
-            lines[index].length - trimmedLines[index].length;
-
-        line++;
+        indent(lines[index].length - trimmedLines[index].length);
     }
 
     return trimmedLines.join(NEW_LINE);
@@ -1338,7 +2126,7 @@ function renderNormalListItem(token, position) {
  * A map of two functions which can create list items.
  */
 
-var LIST_ITEM_MAP = {};
+var LIST_ITEM_MAP = objectCreate();
 
 LIST_ITEM_MAP.true = renderPedanticListItem;
 LIST_ITEM_MAP.false = renderNormalListItem;
@@ -1346,41 +2134,45 @@ LIST_ITEM_MAP.false = renderNormalListItem;
 /**
  * Create a list-item token.
  *
- * @return {Object}
+ * @example
+ *   renderListItem('- _foo_', now());
+ *
+ * @param {Object} value - List-item.
+ * @param {Object} position - List-item location.
+ * @return {Object} - `listItem` node.
  */
-function renderListItem(token, position) {
+function renderListItem(value, position) {
     var self = this;
-    var offsets = self.offset;
     var checked = null;
     var node;
     var task;
-    var offset;
+    var indent;
 
-    token = LIST_ITEM_MAP[self.options.pedantic].apply(self, arguments);
+    value = LIST_ITEM_MAP[self.options.pedantic].apply(self, arguments);
 
     if (self.options.gfm) {
-        task = token.match(EXPRESSION_TASK_ITEM);
+        task = value.match(EXPRESSION_TASK_ITEM);
 
         if (task) {
+            indent = task[0].length;
             checked = task[1].toLowerCase() === 'x';
 
-            offset = task[0].length;
-            offsets[position.line] += offset;
-            token = token.slice(offset);
+            self.indent(position.line)(indent);
+            value = value.slice(indent);
         }
     }
 
     node = {
         'type': LIST_ITEM,
-        'loose': EXPRESSION_LOOSE_LIST_ITEM.test(token) ||
-            token.charAt(token.length - 1) === NEW_LINE
+        'loose': EXPRESSION_LOOSE_LIST_ITEM.test(value) ||
+            value.charAt(value.length - 1) === NEW_LINE
     };
 
     if (self.options.gfm) {
         node.checked = checked;
     }
 
-    node.children = self.tokenizeBlock(token, position);
+    node.children = self.tokenizeBlock(value, position);
 
     return node;
 }
@@ -1388,24 +2180,26 @@ function renderListItem(token, position) {
 /**
  * Create a footnote-definition token.
  *
- * @param {string} id
- * @param {string} value
- * @return {Object}
+ * @example
+ *   renderFootnoteDefinition('1', '_foo_', now());
+ *
+ * @param {string} identifier - Unique reference.
+ * @param {string} value - Contents
+ * @param {Object} position - Definition location.
+ * @return {Object} - `footnoteDefinition` node.
  */
-function renderFootnoteDefinition(id, value, position) {
+function renderFootnoteDefinition(identifier, value, position) {
     var self = this;
     var exitBlockquote = self.enterBlockquote();
     var token;
 
     token = {
         'type': FOOTNOTE_DEFINITION,
-        'id': id,
+        'identifier': identifier,
         'children': self.tokenizeBlock(value, position)
     };
 
     exitBlockquote();
-
-    self.footnotesAsArray.push(id);
 
     return token;
 }
@@ -1413,41 +2207,38 @@ function renderFootnoteDefinition(id, value, position) {
 /**
  * Create a heading token.
  *
- * @param {string} value
- * @param {number} depth
- * @return {Object}
+ * @example
+ *   renderHeading('_foo_', 1, now());
+ *
+ * @param {string} value - Content.
+ * @param {number} depth - Heading depth.
+ * @param {Object} position - Heading content location.
+ * @return {Object} - `heading` node
  */
-function renderHeading(value, depth) {
+function renderHeading(value, depth, position) {
     return {
         'type': HEADING,
         'depth': depth,
-        'children': value
+        'children': this.tokenizeInline(value, position)
     };
 }
 
 /**
  * Create a blockquote token.
  *
- * @param {string} value
- * @return {Object}
+ * @example
+ *   renderBlockquote('_foo_', eat);
+ *
+ * @param {string} value - Content.
+ * @param {Object} now - Position.
+ * @return {Object} - `blockquote` node.
  */
-function renderBlockquote(value, position) {
+function renderBlockquote(value, now) {
     var self = this;
-    var line = position.line;
-    var offset = self.offset;
     var exitBlockquote = self.enterBlockquote();
-    var token;
-
-    value = value.replace(EXPRESSION_BLOCK_QUOTE, function ($0) {
-        offset[line] = (offset[line] || 0) + $0.length;
-        line++;
-
-        return EMPTY;
-    });
-
-    token = {
+    var token = {
         'type': BLOCKQUOTE,
-        'children': this.tokenizeBlock(value, position)
+        'children': this.tokenizeBlock(value, now)
     };
 
     exitBlockquote();
@@ -1458,8 +2249,11 @@ function renderBlockquote(value, position) {
 /**
  * Create a void token.
  *
- * @param {string} type
- * @return {Object}
+ * @example
+ *   renderVoid('horizontalRule');
+ *
+ * @param {string} type - Node type.
+ * @return {Object} - Node of type `type`.
  */
 function renderVoid(type) {
     return {
@@ -1468,13 +2262,16 @@ function renderVoid(type) {
 }
 
 /**
- * Create a children token.
+ * Create a parent.
  *
- * @param {string} type
- * @param {string|Array.<Object>} children
- * @return {Object}
+ * @example
+ *   renderParent('paragraph', '_foo_');
+ *
+ * @param {string} type - Node type.
+ * @param {Array.<Object>} children - Child nodes.
+ * @return {Object} - Node of type `type`.
  */
-function renderBlock(type, children) {
+function renderParent(type, children) {
     return {
         'type': type,
         'children': children
@@ -1484,9 +2281,12 @@ function renderBlock(type, children) {
 /**
  * Create a raw token.
  *
- * @param {string} type
- * @param {string} value
- * @return {Object}
+ * @example
+ *   renderRaw('inlineCode', 'foo()');
+ *
+ * @param {string} type - Node type.
+ * @param {string} value - Contents.
+ * @return {Object} - Node of type `type`.
  */
 function renderRaw(type, value) {
     return {
@@ -1498,35 +2298,37 @@ function renderRaw(type, value) {
 /**
  * Create a link token.
  *
- * @param {boolean} isLink - Whether page or image reference.
- * @param {string} href
- * @param {string} text
- * @param {string?} title
- * @return {Object}
+ * @example
+ *   renderLink(true, 'example.com', 'example', 'Example Domain', now(), eat);
+ *   renderLink(false, 'fav.ico', 'example', 'Example Domain', now(), eat);
+ *
+ * @param {boolean} isLink - Whether linking to a document
+ *   or an image.
+ * @param {string} href - URI reference.
+ * @param {string} text - Content.
+ * @param {string?} title - Title.
+ * @param {Object} position - Location of link.
+ * @param {function(string)} eat
+ * @return {Object} - `link` or `image` node.
  */
-function renderLink(isLink, href, text, title, position) {
+function renderLink(isLink, href, text, title, position, eat) {
     var self = this;
     var exitLink = self.enterLink();
     var token;
 
     token = {
         'type': isLink ? LINK : IMAGE,
-        'title': title ? decode(self.descape(title)) : null
+        'title': title ? decode(self.descape(title), eat) : null
     };
 
-    /*
-     * The `href` should not always be descaped, functions
-     * that invoke `renderLink` should handle that.
-     */
-
-    href = decode(href);
+    href = decode(href, eat);
 
     if (isLink) {
         token.href = href;
         token.children = self.tokenizeInline(text, position);
     } else {
         token.src = href;
-        token.alt = text ? decode(self.descape(text)) : null;
+        token.alt = text ? decode(self.descape(text), eat) : null;
     }
 
     exitLink();
@@ -1537,49 +2339,74 @@ function renderLink(isLink, href, text, title, position) {
 /**
  * Create a footnote token.
  *
- * @param {string} id
- * @return {Object}
+ * @example
+ *   renderFootnote('_foo_', now());
+ *
+ * @param {string} value - Contents.
+ * @param {Object} position - Location of footnote.
+ * @return {Object} - `footnote` node.
  */
-function renderFootnote(id) {
-    return {
-        'type': FOOTNOTE,
-        'id': id
-    };
+function renderFootnote(value, position) {
+    return this.renderInline(FOOTNOTE, value, position);
 }
 
 /**
  * Add a token with inline content.
  *
- * @param {string} type
- * @param {string} value
- * @return {Object}
+ * @example
+ *   renderInline('strong', '_foo_', now());
+ *
+ * @param {string} type - Node type.
+ * @param {string} value - Contents.
+ * @param {Object} position - Location of node.
+ * @return {Object} - Node of type `type`.
  */
-function renderInline(type, value, location) {
-    return {
-        'type': type,
-        'children': this.tokenizeInline(value, location)
-    };
+function renderInline(type, value, position) {
+    return this.renderParent(type, this.tokenizeInline(value, position));
 }
 
 /**
- * Tokenise an escaped sequence.
+ * Add a token with block content.
+ *
+ * @example
+ *   renderBlock('blockquote', 'Foo.', now());
+ *
+ * @param {string} type - Node type.
+ * @param {string} value - Contents.
+ * @param {Object} position - Location of node.
+ * @return {Object} - Node of type `type`.
+ */
+function renderBlock(type, value, position) {
+    return this.renderParent(type, this.tokenizeBlock(value, position));
+}
+
+/**
+ * Tokenise an escape sequence.
+ *
+ * @example
+ *   tokenizeEscape(eat, '\\a', 'a');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole escape.
  * @param {string} $1 - Escaped character.
+ * @return {Node} - `escape` node.
  */
 function tokenizeEscape(eat, $0, $1) {
-    eat($0)(this.renderRaw(ESCAPE, $1));
+    return eat($0)(this.renderRaw(ESCAPE, $1));
 }
 
 /**
  * Tokenise a URL in carets.
  *
+ * @example
+ *   tokenizeAutoLink(eat, '<http://foo.bar>', 'http://foo.bar', '');
+ *
  * @property {boolean} notInLink
  * @param {function(string)} eat
  * @param {string} $0 - Whole link.
  * @param {string} $1 - URL.
- * @param {string?} $2 - Protocol or at.
+ * @param {string?} [$2] - Protocol or at.
+ * @return {Node} - `link` node.
  */
 function tokenizeAutoLink(eat, $0, $1, $2) {
     var self = this;
@@ -1588,6 +2415,7 @@ function tokenizeAutoLink(eat, $0, $1, $2) {
     var now = eat.now();
     var offset = 1;
     var tokenize;
+    var node;
 
     if ($2 === AT_SIGN) {
         if (
@@ -1604,15 +2432,17 @@ function tokenizeAutoLink(eat, $0, $1, $2) {
     now.column += offset;
 
     /*
-     * Temporarily remove support for escapes in autlinks.
+     * Temporarily remove support for escapes in autolinks.
      */
 
     tokenize = self.inlineTokenizers.escape;
     self.inlineTokenizers.escape = null;
 
-    eat($0)(self.renderLink(true, href, text, null, now));
+    node = eat($0)(self.renderLink(true, href, text, null, now, eat));
 
     self.inlineTokenizers.escape = tokenize;
+
+    return node;
 }
 
 tokenizeAutoLink.notInLink = true;
@@ -1620,24 +2450,31 @@ tokenizeAutoLink.notInLink = true;
 /**
  * Tokenise a URL in text.
  *
+ * @example
+ *   tokenizeURL(eat, 'http://foo.bar');
+ *
  * @property {boolean} notInLink
  * @param {function(string)} eat
  * @param {string} $0 - Whole link.
- * @param {string} $1 - URL.
+ * @return {Node} - `link` node.
  */
-function tokenizeURL(eat, $0, $1) {
+function tokenizeURL(eat, $0) {
     var now = eat.now();
 
-    eat($0)(this.renderLink(true, $1, $1, null, now));
+    return eat($0)(this.renderLink(true, $0, $0, null, now, eat));
 }
 
 tokenizeURL.notInLink = true;
 
 /**
- * Tokenise HTML.
+ * Tokenise an HTML tag.
+ *
+ * @example
+ *   tokenizeTag(eat, '<span foo="bar">');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Content.
+ * @return {Node} - `html` node.
  */
 function tokenizeTag(eat, $0) {
     var self = this;
@@ -1648,11 +2485,17 @@ function tokenizeTag(eat, $0) {
         self.inLink = false;
     }
 
-    eat($0)(self.renderRaw(HTML, $0));
+    return eat($0)(self.renderRaw(HTML, $0));
 }
 
 /**
  * Tokenise a link.
+ *
+ * @example
+ *   tokenizeLink(
+ *     eat, '![foo](fav.ico "Favicon")', '![', 'foo', null,
+ *     'fav.ico', 'Foo Domain'
+ *   );
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole link.
@@ -1660,12 +2503,14 @@ function tokenizeTag(eat, $0) {
  * @param {string} $2 - Text.
  * @param {string?} $3 - URL wrapped in angle braces.
  * @param {string?} $4 - Literal URL.
- * @param {string?} $5 - Title wrapped in single or double quotes.
- * @param {string?} $6 - Title wrapped in double quotes.
- * @param {string?} $7 - Title wrapped in parentheses.
+ * @param {string?} $5 - Title wrapped in single or double
+ *   quotes.
+ * @param {string?} [$6] - Title wrapped in double quotes.
+ * @param {string?} [$7] - Title wrapped in parentheses.
+ * @return {Node?} - `link` node, `image` node, or `null`.
  */
 function tokenizeLink(eat, $0, $1, $2, $3, $4, $5, $6, $7) {
-    var isLink = $0.charAt(0) !== EXCLAMATION_MARK;
+    var isLink = $1 === BRACKET_OPEN;
     var href = $4 || $3 || '';
     var title = $7 || $6 || $5;
     var now;
@@ -1675,124 +2520,133 @@ function tokenizeLink(eat, $0, $1, $2, $3, $4, $5, $6, $7) {
 
         now.column += $1.length;
 
-        eat($0)(this.renderLink(isLink, this.descape(href), $2, title, now));
+        return eat($0)(this.renderLink(
+            isLink, this.descape(href), $2, title, now, eat
+        ));
     }
+
+    return null;
 }
 
 /**
- * Tokenise a reference link, invalid link, or inline
- * footnote, or reference footnote.
+ * Tokenise a reference link, image, or footnote;
+ * shortcut reference link, or footnote.
+ *
+ * @example
+ *   tokenizeReference(eat, '[foo]', '[', 'foo');
+ *   tokenizeReference(eat, '[foo][]', '[', 'foo', '');
+ *   tokenizeReference(eat, '[foo][bar]', '[', 'foo', 'bar');
  *
  * @property {boolean} notInLink
  * @param {function(string)} eat
  * @param {string} $0 - Whole link.
  * @param {string} $1 - Prefix.
- * @param {string} $2 - URL.
+ * @param {string} $2 - identifier.
  * @param {string} $3 - Content.
+ * @return {Node} - `linkReference`, `imageReference`, or
+ *   `footnoteReference`.
  */
-function tokenizeReferenceLink(eat, $0, $1, $2, $3) {
+function tokenizeReference(eat, $0, $1, $2, $3) {
     var self = this;
-    var text = $3 || $2;
-    var identifier = normalize(text);
-    var url = self.links[identifier];
-    var token;
-    var now;
+    var text = $2;
+    var identifier = $3 || $2;
+    var type = $1 === BRACKET_OPEN ? 'link' : 'image';
+    var isFootnote = self.options.footnotes && identifier.charAt(0) === CARET;
+    var now = eat.now();
+    var referenceType;
+    var node;
+    var exitLink;
 
-    if (
-        self.options.footnotes &&
-        identifier.charAt(0) === CARET &&
-        self.footnotes[identifier.substr(1)]
-    ) {
-        /*
-         * All block-level footnote-definitions
-         * are already found.  If we find the
-         * provided ID in the footnotes hash, its
-         * most certainly a footnote.
-         */
-
-        eat($0)(self.renderFootnote(identifier.substr(1)));
-    } else if (!url || !url.href) {
-        if (
-            self.options.footnotes &&
-            identifier.charAt(0) === CARET &&
-            text.indexOf(SPACE) > -1
-        ) {
-            /*
-             * All user-defined footnote IDs are
-             * already found.  Thus, we can safely
-             * choose any not-yet-used number as
-             * footnote IDs, without being afraid
-             * these IDs will be defined later.
-             */
-
-            while (self.footnoteCounter in self.footnotes) {
-                self.footnoteCounter++;
-            }
-
-            now = eat.now();
-
-            /*
-             * Add initial bracket plus caret.
-             */
-
-            now.column += $1.length + 1;
-
-            token = self.renderFootnoteDefinition(
-                String(self.footnoteCounter), text.substr(1), now
-            );
-
-            self.footnotes[token.id] = token;
-
-            eat($0)(self.renderFootnote(token.id));
-        } else {
-            eat($0.charAt(0))(self.renderRaw(TEXT, $0.charAt(0)));
-        }
+    if ($3 === undefined) {
+        referenceType = 'shortcut';
+    } else if ($3 === '') {
+        referenceType = 'collapsed';
     } else {
-        now = eat.now($1);
-
-        now.column += $1.length;
-
-        eat($0)(self.renderLink(
-            $0.charAt(0) !== EXCLAMATION_MARK, self.descape(url.href),
-            $2, url.title, now
-        ));
+        referenceType = 'full';
     }
+
+    if (referenceType !== 'shortcut') {
+        isFootnote = false;
+    }
+
+    if (isFootnote) {
+        identifier = identifier.substr(1);
+    }
+
+    if (isFootnote) {
+        if (identifier.indexOf(SPACE) !== -1) {
+            return eat($0)(self.renderFootnote(identifier, eat.now()));
+        } else {
+            type = 'footnote';
+        }
+    }
+
+    now.column += $1.length;
+
+    node = {
+        'type': type + 'Reference',
+        'identifier': normalize(identifier)
+    };
+
+    if (type === 'link' || type === 'image') {
+        node.referenceType = referenceType;
+    }
+
+    if (type === 'link') {
+        exitLink = self.enterLink();
+        node.children = self.tokenizeInline(text, now);
+        exitLink();
+    } else if (type === 'image') {
+        node.alt = decode(self.descape(text), eat);
+    }
+
+    return eat($0)(node);
 }
 
-tokenizeReferenceLink.notInLink = true;
+tokenizeReference.notInLink = true;
 
 /**
  * Tokenise strong emphasis.
+ *
+ * @example
+ *   tokenizeStrong(eat, '**foo**', '**', 'foo');
+ *   tokenizeStrong(eat, '__foo__', null, null, '__', 'foo');
  *
  * @param {function(string)} eat
  * @param {string} $0 - Whole emphasis.
  * @param {string?} $1 - Marker.
  * @param {string?} $2 - Content.
- * @param {string?} $3 - Marker.
- * @param {string?} $4 - Content.
+ * @param {string?} [$3] - Marker.
+ * @param {string?} [$4] - Content.
+ * @return {Node?} - `strong` node, when not empty.
  */
 function tokenizeStrong(eat, $0, $1, $2, $3, $4) {
     var now = eat.now();
     var value = $2 || $4;
 
     if (trim(value) === EMPTY) {
-        return;
+        return null;
     }
 
     now.column += 2;
 
-    eat($0)(this.renderInline(STRONG, value, now));
+    return eat($0)(this.renderInline(STRONG, value, now));
 }
 
 /**
  * Tokenise slight emphasis.
  *
+ * @example
+ *   tokenizeEmphasis(eat, '*foo*', '*', 'foo');
+ *   tokenizeEmphasis(eat, '_foo_', null, null, '_', 'foo');
+ *
  * @param {function(string)} eat
  * @param {string} $0 - Whole emphasis.
  * @param {string?} $1 - Marker.
  * @param {string?} $2 - Content.
- * @param {string?} $3 - Marker.
- * @param {string?} $4 - Content.
+ * @param {string?} [$3] - Marker.
+ * @param {string?} [$4] - Content.
+ * @return {Node?} - `emphasis` node, when not empty.
  */
 function tokenizeEmphasis(eat, $0, $1, $2, $3, $4) {
     var now = eat.now();
@@ -1804,125 +2658,149 @@ function tokenizeEmphasis(eat, $0, $1, $2, $3, $4) {
         value.charAt(0) === marker ||
         value.charAt(value.length - 1) === marker
     ) {
-        return;
+        return null;
     }
 
     now.column += 1;
 
-    eat($0)(this.renderInline(EMPHASIS, value, now));
+    return eat($0)(this.renderInline(EMPHASIS, value, now));
 }
 
 /**
  * Tokenise a deletion.
  *
+ * @example
+ *   tokenizeDeletion(eat, '~~foo~~', '~~', 'foo');
+ *
  * @param {function(string)} eat
  * @param {string} $0 - Whole deletion.
  * @param {string} $1 - Content.
+ * @return {Node} - `delete` node.
  */
 function tokenizeDeletion(eat, $0, $1) {
     var now = eat.now();
 
     now.column += 2;
 
-    eat($0)(this.renderInline(DELETE, $1, now));
+    return eat($0)(this.renderInline(DELETE, $1, now));
 }
 
 /**
  * Tokenise inline code.
  *
+ * @example
+ *   tokenizeInlineCode(eat, '`foo()`', '`', 'foo()');
+ *
  * @param {function(string)} eat
  * @param {string} $0 - Whole code.
  * @param {string} $1 - Initial markers.
  * @param {string} $2 - Content.
+ * @return {Node} - `inlineCode` node.
  */
 function tokenizeInlineCode(eat, $0, $1, $2) {
-    eat($0)(this.renderRaw(INLINE_CODE, trim($2 || '')));
+    return eat($0)(this.renderRaw(INLINE_CODE, trim($2 || '')));
 }
 
 /**
  * Tokenise a break.
  *
- * @param {function(string)} eat
- * @param {string} $0
- */
-function tokenizeBreak(eat, $0) {
-    eat($0)(this.renderVoid(BREAK));
-}
-
-/**
- * Tokenise inline text.
+ * @example
+ *   tokenizeBreak(eat, '  \n');
  *
  * @param {function(string)} eat
  * @param {string} $0
+ * @return {Node} - `break` node.
  */
-function tokenizeInlineText(eat, $0) {
-    eat($0)(this.renderRaw(TEXT, $0));
+function tokenizeBreak(eat, $0) {
+    return eat($0)(this.renderVoid(BREAK));
 }
 
 /**
  * Construct a new parser.
  *
- * @param {Object?} options
- * @constructor Parser
+ * @example
+ *   var parser = new Parser();
+ *
+ * @constructor
+ * @class {Parser}
+ * @param {Object?} [options] - Passed to
+ *   `Parser#setOptions()`.
  */
 function Parser(options) {
     var self = this;
-    var expressions = self.expressions;
-    var rules = copy({}, expressions.rules);
-
-    /*
-     * Create space for definition/reference type nodes.
-     */
-
-    self.links = {};
-    self.footnotes = {};
-    self.footnotesAsArray = [];
-
-    self.options = options;
-
-    self.rules = rules;
-
-    self.footnoteCounter = 1;
+    var rules = copy({}, self.expressions.rules);
 
     self.inLink = false;
     self.atTop = true;
     self.atStart = true;
     self.inBlockquote = false;
 
-    if (options.breaks) {
-        copy(rules, expressions.breaks);
+    self.rules = rules;
+    self.descape = descapeFactory(rules, 'escape');
+
+    self.options = clone(self.options);
+
+    self.setOptions(options);
+}
+
+/**
+ * Set options.  Does not overwrite previously set
+ * options.
+ *
+ * @example
+ *   var parser = new Parser();
+ *   parser.setOptions({gfm: true});
+ *
+ * @this {Parser}
+ * @throws {Error} - When an option is invalid.
+ * @param {Object?} [options] - Parse settings.
+ * @return {Parser} - `self`.
+ */
+Parser.prototype.setOptions = function (options) {
+    var self = this;
+    var expressions = self.expressions;
+    var rules = self.rules;
+    var current = self.options;
+    var key;
+
+    if (options === null || options === undefined) {
+        options = {};
+    } else if (typeof options === 'object') {
+        options = clone(options);
+    } else {
+        raise(options, 'options');
     }
 
-    if (options.gfm) {
-        copy(rules, expressions.gfm);
+    self.options = options;
+
+    for (key in defaultOptions) {
+        validate.boolean(options, key, current[key]);
+
+        if (options[key]) {
+            copy(rules, expressions[key]);
+        }
     }
 
     if (options.gfm && options.breaks) {
         copy(rules, expressions.breaksGFM);
     }
 
-    if (options.commonmark) {
-        copy(rules, expressions.commonmark);
-    }
-
     if (options.gfm && options.commonmark) {
         copy(rules, expressions.commonmarkGFM);
     }
 
-    if (options.pedantic) {
-        copy(rules, expressions.pedantic);
+    if (options.commonmark) {
+        self.enterBlockquote = noopToggler();
     }
 
-    if (options.yaml) {
-        copy(rules, expressions.yaml);
-    }
+    return self;
+};
 
-    if (options.footnotes) {
-        copy(rules, expressions.footnotes);
-    }
+/*
+ * Expose `defaults`.
+ */
 
-    self.descape = descapeFactory(rules, 'escape');
-}
+Parser.prototype.options = defaultOptions;
 
 /*
  * Expose `expressions`.
@@ -1931,20 +2809,53 @@ function Parser(options) {
 Parser.prototype.expressions = defaultExpressions;
 
 /**
+ * Factory to track indentation for each line corresponding
+ * to the given `start` and the number of invocations.
+ *
+ * @param {number} start - Starting line.
+ * @return {function(offset)} - Indenter.
+ */
+Parser.prototype.indent = function (start) {
+    var self = this;
+    var line = start;
+
+    /**
+     * Intender which increments the global offset,
+     * starting at the bound line, and further incrementing
+     * each line for each invocation.
+     *
+     * @example
+     *   indenter(2)
+     *
+     * @param {number} offset - Number to increment the
+     *   offset.
+     */
+    function indenter(offset) {
+        self.offset[line] = (self.offset[line] || 0) + offset;
+
+        line++;
+    }
+
+    return indenter;
+};
+
+/**
  * Parse `value` into an AST.
  *
- * @param {string} value
- * @return {Object}
+ * @example
+ *   var parser = new Parser();
+ *   parser.parse(new File('_Foo_.'));
+ *
+ * @this {Parser}
+ * @param {Object} file
+ * @return {Object} - `root` node.
  */
-Parser.prototype.parse = function (value) {
+Parser.prototype.parse = function (file) {
     var self = this;
-    var footnotes;
-    var footnotesAsArray;
-    var id;
-    var index;
+    var value = clean(String(file));
     var token;
-    var start;
-    var last;
+
+    self.file = file;
 
     /*
      * Add an `offset` matrix, used to keep track of
@@ -1953,155 +2864,76 @@ Parser.prototype.parse = function (value) {
 
     self.offset = {};
 
-    token = self.renderBlock(ROOT, self.tokenizeAll(
-        self.tokenizeBlock(clean(value))
-    ));
+    token = self.renderBlock(ROOT, value);
 
-    if (self.options.footnotes) {
-        footnotes = self.footnotes;
-        footnotesAsArray = self.footnotesAsArray;
+    if (self.options.position) {
+        token.position = {
+            'start': {
+                'line': 1,
+                'column': 1
+            }
+        };
 
-        index = -1;
-
-        while (footnotesAsArray[++index]) {
-            id = footnotesAsArray[index];
-
-            footnotes[id].children = self.tokenizeAll(footnotes[id].children);
-        }
-
-        token.footnotes = footnotes;
-    }
-
-    last = token.children[token.children.length - 1];
-
-    token.position = {};
-
-    start = {
-        'line': 1,
-        'column': 1
-    };
-
-    token.position.start = start;
-
-    token.position.end = last ? last.position.end : start;
-
-    return token;
-};
-
-/**
- * Lex loop.
- *
- * @param {Array.<Object>} tokens
- * @return {Array.<Object>}
- */
-Parser.prototype.tokenizeAll = function (tokens) {
-    var self = this;
-    var out = [];
-    var index = -1;
-    var length = tokens.length;
-
-    while (++index < length) {
-        out[index] = self.tokenizeOne(tokens[index]);
-    }
-
-    return out;
-};
-
-/**
- * Tokenise a token.
- *
- * @param {Object} token
- * @return {Object}
- */
-Parser.prototype.tokenizeOne = function (token) {
-    var self = this;
-    var type = token.type;
-    var position = token.position;
-
-    if (type === TEXT) {
-        token = self.renderBlock(PARAGRAPH, token.value);
-        token.position = position;
-        token = self.tokenizeOne(token);
-    } else if (
-        type === HEADING ||
-        type === PARAGRAPH ||
-        type === TABLE_CELL
-    ) {
-        token.children = self.tokenizeInline(token.children, position.start);
-    } else if (
-        type === BLOCKQUOTE ||
-        type === LIST ||
-        type === LIST_ITEM ||
-        type === TABLE ||
-        type === TABLE_HEADER ||
-        type === TABLE_ROW
-    ) {
-        token.children = self.tokenizeAll(token.children);
+        token.position.end = self.eof || token.position.start;
     }
 
     return token;
 };
 
 /*
- * Expose tokenizers for block-level nodes.
+ * Enter and exit helpers.
  */
 
-Parser.prototype.blockTokenizers = {
-    'yamlFrontMatter': tokenizeYAMLFrontMatter,
-    'newline': tokenizeNewline,
-    'code': tokenizeCode,
-    'fences': tokenizeFences,
-    'heading': tokenizeHeading,
-    'lineHeading': tokenizeLineHeading,
-    'horizontalRule': tokenizeHorizontalRule,
-    'blockquote': tokenizeBlockquote,
-    'list': tokenizeList,
-    'html': tokenizeHtml,
-    'linkDefinition': tokenizeLinkDefinition,
-    'footnoteDefinition': tokenizeFootnoteDefinition,
-    'looseTable': tokenizeTable,
-    'table': tokenizeTable,
-    'paragraph': tokenizeParagraph,
-    'blockText': tokenizeText
-};
+Parser.prototype.enterLink = stateToggler('inLink', false);
+Parser.prototype.exitTop = stateToggler('atTop', true);
+Parser.prototype.exitStart = stateToggler('atStart', true);
+Parser.prototype.enterBlockquote = stateToggler('inBlockquote', false);
 
 /*
- * Expose order in which to parse block-level nodes.
+ * Expose helpers
  */
 
-Parser.prototype.blockMethods = [
-    'yamlFrontMatter',
-    'newline',
-    'code',
-    'fences',
-    'blockquote',
-    'heading',
-    'horizontalRule',
-    'list',
-    'lineHeading',
-    'html',
-    'linkDefinition',
-    'footnoteDefinition',
-    'looseTable',
-    'table',
-    'paragraph',
-    'blockText'
-];
+Parser.prototype.renderRaw = renderRaw;
+Parser.prototype.renderVoid = renderVoid;
+Parser.prototype.renderParent = renderParent;
+Parser.prototype.renderInline = renderInline;
+Parser.prototype.renderBlock = renderBlock;
+
+Parser.prototype.renderLink = renderLink;
+Parser.prototype.renderCodeBlock = renderCodeBlock;
+Parser.prototype.renderBlockquote = renderBlockquote;
+Parser.prototype.renderList = renderList;
+Parser.prototype.renderListItem = renderListItem;
+Parser.prototype.renderFootnoteDefinition = renderFootnoteDefinition;
+Parser.prototype.renderHeading = renderHeading;
+Parser.prototype.renderFootnote = renderFootnote;
 
 /**
- * Construct a tokenizer.
+ * Construct a tokenizer.  This creates both
+ * `tokenizeInline` and `tokenizeBlock`.
  *
- * @param {string} type
+ * @example
+ *   Parser.prototype.tokenizeInline = tokenizeFactory('inline');
+ *
+ * @param {string} type - Name of parser, used to find
+ *   its expressions (`%sMethods`) and tokenizers
+ *   (`%Tokenizers`).
  * @return {function(string, Object?): Array.<Object>}
  */
 function tokenizeFactory(type) {
     /**
      * Tokenizer for a bound `type`
      *
-     * @param {string} value
-     * @return {Array.<Object>}
+     * @example
+     *   parser = new Parser();
+     *   parser.tokenizeInline('_foo_');
+     *
+     * @param {string} value - Content.
+     * @param {Object?} [location] - Offset at which `value`
+     *   starts.
+     * @return {Array.<Object>} - Nodes.
      */
-    return function (value, location) {
+    function tokenize(value, location) {
         var self = this;
         var offset = self.offset;
         var tokens = [];
@@ -2110,6 +2942,8 @@ function tokenizeFactory(type) {
         var tokenizers = self[type + 'Tokenizers'];
         var line = location ? location.line : 1;
         var column = location ? location.column : 1;
+        var patchPosition = self.options.position;
+        var add;
         var index;
         var length;
         var method;
@@ -2117,7 +2951,7 @@ function tokenizeFactory(type) {
         var match;
         var matched;
         var valueLength;
-        var err;
+        var eater;
 
         /*
          * Trim white space only lines.
@@ -2130,14 +2964,21 @@ function tokenizeFactory(type) {
         /**
          * Update line and column based on `value`.
          *
+         * @example
+         *   updatePosition('foo');
+         *
          * @param {string} subvalue
          */
         function updatePosition(subvalue) {
-            var lines = subvalue.match(/\n/g);
-            var lastIndex = subvalue.lastIndexOf(NEW_LINE);
+            var character = -1;
+            var subvalueLength = subvalue.length;
+            var lastIndex = -1;
 
-            if (lines) {
-                line += lines.length;
+            while (++character < subvalueLength) {
+                if (subvalue.charAt(character) === NEW_LINE) {
+                    lastIndex = character;
+                    line++;
+                }
             }
 
             if (lastIndex === -1) {
@@ -2147,7 +2988,7 @@ function tokenizeFactory(type) {
             }
 
             if (line in offset) {
-                if (lines) {
+                if (lastIndex !== -1) {
                     column += offset[line];
                 } else if (column <= offset[line]) {
                     column = offset[line] + 1;
@@ -2156,7 +2997,42 @@ function tokenizeFactory(type) {
         }
 
         /**
+         * Get offset. Called before the fisrt character is
+         * eaten to retrieve the range's offsets.
+         *
+         * @return {Function} - `done`, to be called when
+         *   the last character is eaten.
+         */
+        function getOffset() {
+            var indentation = [];
+            var pos = line + 1;
+
+            /**
+             * Done. Called when the last character is
+             * eaten to retrieve the range's offsets.
+             *
+             * @return {Array.<number>} - Offset.
+             */
+            function done() {
+                var last = line + 1;
+
+                while (pos < last) {
+                    indentation.push((offset[pos] || 0) + 1);
+
+                    pos++;
+                }
+
+                return indentation;
+            }
+
+            return done;
+        }
+
+        /**
          * Get the current position.
+         *
+         * @example
+         *   position = now(); // {line: 1, column: 1}
          *
          * @return {Object}
          */
@@ -2170,6 +3046,12 @@ function tokenizeFactory(type) {
         /**
          * Store position information for a node.
          *
+         * @example
+         *   start = now();
+         *   updatePosition('foo');
+         *   location = new Position(start);
+         *   // {start: {line: 1, column: 1}, end: {line: 1, column: 3}}
+         *
          * @param {Object} start
          */
         function Position(start) {
@@ -2178,96 +3060,284 @@ function tokenizeFactory(type) {
         }
 
         /**
+         * Throw when a value is incorrectly eaten.
+         * This shouldn’t happen but will throw on new,
+         * incorrect rules.
+         *
+         * @example
+         *   // When the current value is set to `foo bar`.
+         *   validateEat('foo');
+         *   eat('foo');
+         *
+         *   validateEat('bar');
+         *   // throws, because the space is not eaten.
+         *
+         * @param {string} subvalue - Value to be eaten.
+         * @throws {Error} - When `subvalue` cannot be eaten.
+         */
+        function validateEat(subvalue) {
+            /* istanbul ignore if */
+            if (value.substring(0, subvalue.length) !== subvalue) {
+                self.file.fail(
+                    'Incorrectly eaten value: please report this ' +
+                    'warning on http://git.io/vUYWz', now()
+                );
+            }
+        }
+
+        /**
          * Mark position and patch `node.position`.
+         *
+         * @example
+         *   var update = position();
+         *   updatePosition('foo');
+         *   update({});
+         *   // {
+         *   //   position: {
+         *   //     start: {line: 1, column: 1}
+         *   //     end: {line: 1, column: 3}
+         *   //   }
+         *   // }
          *
          * @returns {function(Node): Node}
          */
         function position() {
-          var start = now();
+            var before = now();
 
-          return function (node) {
-              start = node.position ? node.position.start : start;
+            /**
+             * Add the position to a node.
+             *
+             * @example
+             *   update({type: 'text', value: 'foo'});
+             *
+             * @param {Node} node - Node to attach position
+             *   on.
+             * @return {Node} - `node`.
+             */
+            function update(node, indent) {
+                var prev = node.position;
+                var start = prev ? prev.start : before;
+                var combined = [];
+                var n = prev && prev.end.line;
+                var l = before.line;
 
-              node.position = new Position(start);
+                node.position = new Position(start);
 
-              return node;
-          };
+                /*
+                 * If there was already a `position`, this
+                 * node was merged.  Fixing `start` wasn't
+                 * hard, but the indent is different.
+                 * Especially because some information, the
+                 * indent between `n` and `l` wasn't
+                 * tracked.  Luckily, that space is
+                 * (should be?) empty, so we can safely
+                 * check for it now.
+                 */
+
+                if (prev) {
+                    combined = prev.indent;
+
+                    if (n < l) {
+                        while (++n < l) {
+                            combined.push((offset[n] || 0) + 1);
+                        }
+
+                        combined.push(before.column);
+                    }
+
+                    indent = combined.concat(indent);
+                }
+
+                node.position.indent = indent;
+
+
+                return node;
+            }
+
+            return update;
         }
 
         /**
-         * Add `token` to `parent`, or `tokens`.
+         * Add `token` to `parent`s children or to `tokens`.
+         * Performs merges where possible.
          *
-         * @param {Object} parent
-         * @param {Object?} token
-         * @return {Object} The added or merged token.
+         * @example
+         *   add({});
+         *
+         *   add({}, {children: []});
+         *
+         * @param {Object} token - Node to add.
+         * @param {Object} [parent] - Parent to insert into.
+         * @return {Object} - Added or merged into token.
          */
-        function add(parent, token) {
+        add = function (token, parent) {
+            var isMultiple = 'length' in token;
             var prev;
             var children;
 
-            if (!token) {
+            if (!parent) {
                 children = tokens;
-                token = parent;
             } else {
-                if (!parent.children) {
-                    parent.children = [];
-                }
-
                 children = parent.children;
             }
 
-            prev = children[children.length - 1];
+            if (isMultiple) {
+                arrayPush.apply(children, token);
+            } else {
+                if (type === INLINE && token.type === TEXT) {
+                    token.value = decode(token.value, eater);
+                }
 
-            if (type === INLINE && token.type === TEXT) {
-                token.value = decode(token.value);
-            }
+                prev = children[children.length - 1];
 
-            if (
-                prev &&
-                token.type === prev.type &&
-                token.type in MERGEABLE_NODES
-            ) {
-                token = MERGEABLE_NODES[token.type].call(
-                    self, prev, token, type
-                );
-            }
+                if (
+                    prev &&
+                    token.type === prev.type &&
+                    token.type in MERGEABLE_NODES
+                ) {
+                    token = MERGEABLE_NODES[token.type].call(
+                        self, prev, token
+                    );
+                }
 
-            if (token !== prev) {
-                children.push(token);
-            }
+                if (token !== prev) {
+                    children.push(token);
+                }
 
-            if (self.atStart && tokens.length) {
-                self.exitStart();
+                if (self.atStart && tokens.length) {
+                    self.exitStart();
+                }
             }
 
             return token;
-        }
+        };
 
         /**
          * Remove `subvalue` from `value`.
-         * Expects `subvalue` to be at the start from `value`,
-         * and applies no validation.
+         * Expects `subvalue` to be at the start from
+         * `value`, and applies no validation.
          *
-         * @param {string} subvalue
-         * @return {Function} See add.
+         * @example
+         *   eat('foo')({type: 'text', value: 'foo'});
+         *
+         * @param {string} subvalue - Removed from `value`,
+         *   and passed to `updatePosition`.
+         * @return {Function} - Wrapper around `add`, which
+         *   also adds `position` to node.
          */
         function eat(subvalue) {
+            var indent = getOffset();
             var pos = position();
+            var current = now();
+
+            validateEat(subvalue);
+
+            /**
+             * Add the given arguments, add `position` to
+             * the returned node, and return the node.
+             *
+             * @return {Node}
+             */
+            function apply() {
+                return pos(add.apply(null, arguments), indent);
+            }
+
+            /**
+             * Functions just like apply, but resets the
+             * content:  the line and column are reversed,
+             * and the eaten value is re-added.
+             *
+             * This is useful for nodes with a single
+             * type of content, such as lists and tables.
+             *
+             * See `apply` above for what parameters are
+             * expected.
+             *
+             * @return {Node}
+             */
+            function reset() {
+                var node = apply.apply(null, arguments);
+
+                line = current.line;
+                column = current.column;
+                value = subvalue + value;
+
+                return node;
+            }
+
+            apply.reset = reset;
 
             value = value.substring(subvalue.length);
 
             updatePosition(subvalue);
 
-            return function () {
-                return pos(add.apply(null, arguments));
-            };
+            indent = indent();
+
+            return apply;
+        }
+
+        /**
+         * Same as `eat` above, but will not add positional
+         * information to nodes.
+         *
+         * @example
+         *   noEat('foo')({type: 'text', value: 'foo'});
+         *
+         * @param {string} subvalue - Removed from `value`.
+         * @return {Function} - Wrapper around `add`.
+         */
+        function noEat(subvalue) {
+            validateEat(subvalue);
+
+            /**
+             * Add the given arguments, and return the
+             * node.
+             *
+             * @return {Node}
+             */
+            function apply() {
+                return add.apply(null, arguments);
+            }
+
+            /**
+             * Functions just like apply, but resets the
+             * content: the eaten value is re-added.
+             *
+             * @return {Node}
+             */
+            function reset() {
+                var node = apply.apply(null, arguments);
+
+                value = subvalue + value;
+
+                return node;
+            }
+
+            apply.reset = reset;
+
+            value = value.substring(subvalue.length);
+
+            return apply;
         }
 
         /*
-         * Expose `now` on `eat`.
+         * Expose the eater, depending on if `position`s
+         * should be patched on nodes.
          */
 
-        eat.now = now;
+        eater = patchPosition ? eat : noEat;
+
+        /*
+         * Expose `now` on `eater`.
+         */
+
+        eater.now = now;
+
+        /*
+         * Expose `file` on `eater`.
+         */
+
+        eater.file = self.file;
 
         /*
          * Sync initial offset.
@@ -2280,7 +3350,7 @@ function tokenizeFactory(type) {
          * block-expressions.  When one matches, invoke
          * its companion function.  If no expression
          * matches, something failed (should not happen)
-         * and an expression is thrown.
+         * and an exception is thrown.
          */
 
         while (value) {
@@ -2304,7 +3374,7 @@ function tokenizeFactory(type) {
                 if (match) {
                     valueLength = value.length;
 
-                    method.apply(self, [eat].concat(match));
+                    method.apply(self, [eater].concat(match));
 
                     matched = valueLength !== value.length;
 
@@ -2316,45 +3386,86 @@ function tokenizeFactory(type) {
 
             /* istanbul ignore if */
             if (!matched) {
-                err = new Error(line + ':' + column + ': Infinite loop');
-                err.reason = 'Infinite loop';
-                err.line = line;
-                err.column = column;
+                self.file.fail('Infinite loop', eater.now());
 
-                throw err;
+                /*
+                 * Errors are not thrown on `File#fail`
+                 * when `quiet: true`.
+                 */
+
+                break;
             }
         }
 
+        self.eof = now();
+
         return tokens;
-    };
+    }
+
+    return tokenize;
 }
 
+/*
+ * Expose tokenizers for block-level nodes.
+ */
+
+Parser.prototype.blockTokenizers = {
+    'yamlFrontMatter': tokenizeYAMLFrontMatter,
+    'newline': tokenizeNewline,
+    'code': tokenizeCode,
+    'fences': tokenizeFences,
+    'heading': tokenizeHeading,
+    'lineHeading': tokenizeLineHeading,
+    'horizontalRule': tokenizeHorizontalRule,
+    'blockquote': tokenizeBlockquote,
+    'list': tokenizeList,
+    'html': tokenizeHtml,
+    'definition': tokenizeDefinition,
+    'footnoteDefinition': tokenizeFootnoteDefinition,
+    'looseTable': tokenizeTable,
+    'table': tokenizeTable,
+    'paragraph': tokenizeParagraph
+};
+
+/*
+ * Expose order in which to parse block-level nodes.
+ */
+
+Parser.prototype.blockMethods = [
+    'yamlFrontMatter',
+    'newline',
+    'code',
+    'fences',
+    'blockquote',
+    'heading',
+    'horizontalRule',
+    'list',
+    'lineHeading',
+    'html',
+    'definition',
+    'footnoteDefinition',
+    'looseTable',
+    'table',
+    'paragraph',
+    'blockText'
+];
+
 /**
- * Lex `value`.
+ * Block tokenizer.
  *
- * @param {string} value
- * @return {Array.<Object>}
+ * @example
+ *   var parser = new Parser();
+ *   parser.tokenizeBlock('> foo.');
+ *
+ * @param {string} value - Content.
+ * @return {Array.<Object>} - Nodes.
  */
 
 Parser.prototype.tokenizeBlock = tokenizeFactory(BLOCK);
 
 /*
- * Expose helpers
+ * Expose tokenizers for inline-level nodes.
  */
-
-Parser.prototype.renderRaw = renderRaw;
-Parser.prototype.renderVoid = renderVoid;
-Parser.prototype.renderBlock = renderBlock;
-Parser.prototype.renderInline = renderInline;
-
-Parser.prototype.renderLink = renderLink;
-Parser.prototype.renderCodeBlock = renderCodeBlock;
-Parser.prototype.renderBlockquote = renderBlockquote;
-Parser.prototype.renderList = renderList;
-Parser.prototype.renderListItem = renderListItem;
-Parser.prototype.renderFootnoteDefinition = renderFootnoteDefinition;
-Parser.prototype.renderHeading = renderHeading;
-Parser.prototype.renderFootnote = renderFootnote;
 
 Parser.prototype.inlineTokenizers = {
     'escape': tokenizeEscape,
@@ -2362,15 +3473,19 @@ Parser.prototype.inlineTokenizers = {
     'url': tokenizeURL,
     'tag': tokenizeTag,
     'link': tokenizeLink,
-    'referenceLink': tokenizeReferenceLink,
-    'invalidLink': tokenizeReferenceLink,
+    'reference': tokenizeReference,
+    'shortcutReference': tokenizeReference,
     'strong': tokenizeStrong,
     'emphasis': tokenizeEmphasis,
     'deletion': tokenizeDeletion,
     'inlineCode': tokenizeInlineCode,
     'break': tokenizeBreak,
-    'inlineText': tokenizeInlineText
+    'inlineText': tokenizeText
 };
+
+/*
+ * Expose order in which to parse inline-level nodes.
+ */
 
 Parser.prototype.inlineMethods = [
     'escape',
@@ -2378,8 +3493,8 @@ Parser.prototype.inlineMethods = [
     'url',
     'tag',
     'link',
-    'referenceLink',
-    'invalidLink',
+    'reference',
+    'shortcutReference',
     'strong',
     'emphasis',
     'deletion',
@@ -2389,80 +3504,35 @@ Parser.prototype.inlineMethods = [
 ];
 
 /**
- * Tokenise an inline value.
+ * Inline tokenizer.
  *
- * @param {string} value
- * @return {Array.<Object>}
+ * @example
+ *   var parser = new Parser();
+ *   parser.tokenizeInline('_foo_');
+ *
+ * @param {string} value - Content.
+ * @return {Array.<Object>} - Nodes.
  */
 
 Parser.prototype.tokenizeInline = tokenizeFactory(INLINE);
 
 /**
- * Construct a state toggler.
- *
- * @param {string} property - Thing th toggle
- * @param {boolean} state - It's default state.
- * @return {Function} - Toggler.
- */
-function stateToggler(property, state) {
-    /**
-     * Construct a toggler for the bound property.
-     *
-     * @return {Function} - Callback to cancel the state.
-     */
-    return function () {
-        var self = this;
-        var current = self[property];
-
-        self[property] = !state;
-
-        /**
-         * State cancler, cancels the state if allowed.
-         */
-        return function () {
-            self[property] = current;
-        };
-    };
-}
-
-Parser.prototype.enterLink = stateToggler('inLink', false);
-Parser.prototype.exitTop = stateToggler('atTop', true);
-Parser.prototype.exitStart = stateToggler('atStart', true);
-Parser.prototype.enterBlockquote = stateToggler('inBlockquote', false);
-
-/**
  * Transform a markdown document into an AST.
  *
- * @param {string} value
- * @param {Object?} options
- * @param {Function?} CustomParser
- * @return {Object}
+ * @example
+ *   parse(new File('> foo.'), {gfm: true});
+ *
+ * @this {Object?} - When this function is places on an
+ *   object which also houses a `Parser` property, that
+ *   class is used.
+ * @param {File} file - Virtual file.
+ * @param {Object?} [options] - Settings for the parser.
+ * @return {Object} - Abstract syntax tree.
  */
-function parse(value, options, CustomParser) {
-    if (!CustomParser) {
-        CustomParser = this.Parser || Parser;
-    }
+function parse(file, options) {
+    var CustomParser = this.Parser || Parser;
 
-    if (typeof value !== 'string') {
-        raise(value, 'value');
-    }
-
-    if (options === null || options === undefined) {
-        options = {};
-    } else if (typeof options !== 'object') {
-        raise(options, 'options');
-    } else {
-        options = copy({}, options);
-    }
-
-    validate.bool(options, 'gfm', defaults.gfm);
-    validate.bool(options, 'yaml', defaults.yaml);
-    validate.bool(options, 'commonmark', defaults.commonmark);
-    validate.bool(options, 'footnotes', defaults.footnotes);
-    validate.bool(options, 'breaks', defaults.breaks);
-    validate.bool(options, 'pedantic', defaults.pedantic);
-
-    return new CustomParser(options).parse(value);
+    return new CustomParser(options).parse(file);
 }
 
 /*
@@ -2472,32 +3542,48 @@ function parse(value, options, CustomParser) {
 parse.Parser = Parser;
 
 /*
+ * Expose `tokenizeFactory` so dependencies could create
+ * their own tokenizers.
+ */
+
+Parser.prototype.tokenizeFactory = tokenizeFactory;
+
+/*
  * Expose `parse` on `module.exports`.
  */
 
 module.exports = parse;
 
-},{"./defaults.js":3,"./expressions.js":4,"./utilities.js":7,"he":8}],6:[function(require,module,exports){
+},{"./defaults.js":3,"./expressions.js":4,"./utilities.js":8,"he":9,"repeat-string":11}],7:[function(require,module,exports){
+/**
+ * @author Titus Wormer
+ * @copyright 2015 Titus Wormer. All rights reserved.
+ * @module Stringify
+ * @fileoverview Compile a an abstract syntax tree into
+ *   a markdown document.
+ */
+
 'use strict';
 
 /*
  * Dependencies.
  */
 
+var he = require('he');
 var table = require('markdown-table');
+var repeat = require('repeat-string');
 var utilities = require('./utilities.js');
-var defaults = require('./defaults.js').stringify;
+var defaultOptions = require('./defaults.js').stringify;
 
 /*
- * Cached methods.
+ * Methods.
  */
 
-var repeat = utilities.repeat;
-var copy = utilities.copy;
+var clone = utilities.clone;
 var raise = utilities.raise;
-var trimLeft = utilities.trimLeft;
 var validate = utilities.validate;
 var count = utilities.countCharacter;
+var objectCreate = utilities.create;
 
 /*
  * Constants.
@@ -2506,9 +3592,23 @@ var count = utilities.countCharacter;
 var HALF = 2;
 var INDENT = 4;
 var MINIMUM_CODE_FENCE_LENGTH = 3;
+var YAML_FENCE_LENGTH = 3;
 var MINIMUM_RULE_LENGTH = 3;
+var MAILTO = 'mailto:';
+
+/*
+ * Expressions.
+ */
 
 var EXPRESSIONS_WHITE_SPACE = /\s/;
+
+/*
+ * Expression for a protocol.
+ *
+ * @see http://en.wikipedia.org/wiki/URI_scheme#Generic_syntax
+ */
+
+var PROTOCOL = /^[a-z][a-z+.-]+:\/?/i;
 
 /*
  * Characters.
@@ -2548,62 +3648,195 @@ var GAP = BREAK + LINE;
 var DOUBLE_TILDE = TILDE + TILDE;
 
 /*
- * Define allowed list-bullet characters.
+ * Allowed entity options.
  */
 
-var LIST_BULLETS = {};
+var ENTITY_OPTIONS = objectCreate();
+
+ENTITY_OPTIONS.true = true;
+ENTITY_OPTIONS.false = true;
+ENTITY_OPTIONS.numbers = true;
+ENTITY_OPTIONS.escape = true;
+
+/*
+ * Allowed list-bullet characters.
+ */
+
+var LIST_BULLETS = objectCreate();
 
 LIST_BULLETS[ASTERISK] = true;
 LIST_BULLETS[DASH] = true;
 LIST_BULLETS[PLUS] = true;
 
 /*
- * Define allowed horizontal-rule bullet characters.
+ * Allowed horizontal-rule bullet characters.
  */
 
-var HORIZONTAL_RULE_BULLETS = {};
+var HORIZONTAL_RULE_BULLETS = objectCreate();
 
 HORIZONTAL_RULE_BULLETS[ASTERISK] = true;
 HORIZONTAL_RULE_BULLETS[DASH] = true;
 HORIZONTAL_RULE_BULLETS[UNDERSCORE] = true;
 
 /*
- * Define allowed emphasis characters.
+ * Allowed emphasis characters.
  */
 
-var EMPHASIS_MARKERS = {};
+var EMPHASIS_MARKERS = objectCreate();
 
 EMPHASIS_MARKERS[UNDERSCORE] = true;
 EMPHASIS_MARKERS[ASTERISK] = true;
 
 /*
- * Define allowed emphasis characters.
+ * Allowed fence markers.
  */
 
-var FENCE_MARKERS = {};
+var FENCE_MARKERS = objectCreate();
 
 FENCE_MARKERS[TICK] = true;
 FENCE_MARKERS[TILDE] = true;
 
 /*
- * Define which method to use based on `list.ordered`.
+ * Which method to use based on `list.ordered`.
  */
 
-var ORDERED_MAP = {};
+var ORDERED_MAP = objectCreate();
 
 ORDERED_MAP.true = 'visitOrderedItems';
 ORDERED_MAP.false = 'visitUnorderedItems';
 
+/*
+ * Which checkbox to use.
+ */
+
+var CHECKBOX_MAP = objectCreate();
+
+CHECKBOX_MAP.null = EMPTY;
+CHECKBOX_MAP.undefined = EMPTY;
+CHECKBOX_MAP.true = SQUARE_BRACKET_OPEN + 'x' + SQUARE_BRACKET_CLOSE + SPACE;
+CHECKBOX_MAP.false = SQUARE_BRACKET_OPEN + SPACE + SQUARE_BRACKET_CLOSE +
+    SPACE;
+
+/**
+ * Encode noop.
+ * Simply returns the given value.
+ *
+ * @example
+ *   var encode = encodeNoop();
+ *   encode('AT&T') // 'AT&T'
+ *
+ * @param {string} value - Content.
+ * @return {string} - Content, without any modifications.
+ */
+function encodeNoop(value) {
+    return value;
+}
+
+/**
+ * Factory to encode HTML entities.
+ * Creates a no-operation function when `type` is
+ * `'false'`, a function which encodes using named
+ * references when `type` is `'true'`, and a function
+ * which encodes using numbered references when `type` is
+ * `'numbers'`.
+ *
+ * By default this should not throw errors, but he does
+ * throw an error when in `strict` mode:
+ *
+ *     he.encode.options.strict = true;
+ *     encodeFactory('true')('\x01') // throws
+ *
+ * These are thrown on the currently compiled `File`.
+ *
+ * @example
+ *   var file = new File();
+ *
+ *   var encode = encodeFactory('false', file);
+ *   encode('AT&T') // 'AT&T'
+ *
+ *   encode = encodeFactory('true', file);
+ *   encode('AT&T') // 'AT&amp;T'
+ *
+ *   encode = encodeFactory('numbers', file);
+ *   encode('AT&T') // 'ATT&#x26;T'
+ *
+ * @param {string} type - Either `'true'`, `'false'`, or
+ *   `numbers`.
+ * @param {File} file - Currently compiled virtual file.
+ * @return {function(string): string} - Function which
+ *   takes a value and returns its encoded version.
+ */
+function encodeFactory(type, file) {
+    var options = {};
+    var fn;
+
+    if (type === 'false') {
+        return encodeNoop;
+    }
+
+    if (type === 'true') {
+        options.useNamedReferences = true;
+    }
+
+    fn = type === 'escape' ? 'escape' : 'encode';
+
+    /**
+     * Encode HTML entities using `he` using bound options.
+     *
+     * @see https://github.com/mathiasbynens/he#strict
+     *
+     * @example
+     *   // When `type` is `'true'`.
+     *   encode('AT&T'); // 'AT&amp;T'
+     *
+     *   // When `type` is `'numbers'`.
+     *   encode('AT&T'); // 'ATT&#x26;T'
+     *
+     * @param {string} value - Content.
+     * @param {Object} node - Node which is compiled.
+     * @return {string} - Encoded content.
+     * @throws {Error} - When `file.quiet` is not `true`.
+     *   However, by default `he` does not throw on
+     *   parse errors, but when
+     *   `he.encode.options.strict: true`, they occur on
+     *   invalid HTML.
+     */
+    function encode(value, node) {
+        try {
+            return he[fn](value, options);
+        } catch (exception) {
+            file.fail(exception, node.position);
+        }
+    }
+
+    return encode;
+}
+
 /**
  * Checks if `url` needs to be enclosed by angle brackets.
  *
+ * @example
+ *   encloseURI('foo bar') // '<foo bar>'
+ *   encloseURI('foo(bar(baz)') // '<foo(bar(baz)>'
+ *   encloseURI('') // '<>'
+ *   encloseURI('example.com') // 'example.com'
+ *   encloseURI('example.com', true) // '<example.com>'
+ *
  * @param {string} uri
- * @return {boolean}
+ * @param {boolean?} [always] - Force enclosing.
+ * @return {boolean} - Properly enclosed `uri`.
  */
-function needsAngleBraceEnclosure(uri) {
-    return !uri.length ||
+function encloseURI(uri, always) {
+    if (
+        always ||
+        !uri.length ||
         EXPRESSIONS_WHITE_SPACE.test(uri) ||
-        count(uri, PARENTHESIS_OPEN) !== count(uri, PARENTHESIS_CLOSE);
+        count(uri, PARENTHESIS_OPEN) !== count(uri, PARENTHESIS_CLOSE)
+    ) {
+        return ANGLE_BRACKET_OPEN + uri + ANGLE_BRACKET_CLOSE;
+    }
+
+    return uri;
 }
 
 /**
@@ -2616,13 +3849,19 @@ function needsAngleBraceEnclosure(uri) {
  * @see https://github.com/vmg/redcarpet/issues/473
  * @see https://github.com/jgm/CommonMark/issues/308
  *
- * @param {string} title
- * @return {string}
+ * @example
+ *   encloseTitle('foo') // '"foo"'
+ *   encloseTitle('foo \'bar\' baz') // '"foo \'bar\' baz"'
+ *   encloseTitle('foo "bar" baz') // '\'foo "bar" baz\''
+ *   encloseTitle('foo "bar" \'baz\'') // '"foo "bar" \'baz\'"'
+ *
+ * @param {string} title - Content.
+ * @return {string} - Properly enclosed title.
  */
 function encloseTitle(title) {
     var delimiter = QUOTE_DOUBLE;
 
-    if (title.indexOf(QUOTE_DOUBLE) !== -1) {
+    if (title.indexOf(delimiter) !== -1) {
         delimiter = QUOTE_SINGLE;
     }
 
@@ -2630,29 +3869,18 @@ function encloseTitle(title) {
 }
 
 /**
- * Helper to get the keys in an object.
- *
- * @param {Object} object
- * @return {Array.<string>}
- */
-function getKeys(object) {
-    var results = [];
-    var key;
-
-    for (key in object) {
-        results.push(key);
-    }
-
-    return results;
-}
-
-/**
  * Get the count of the longest repeating streak
  * of `character` in `value`.
  *
- * @param {string} value
- * @param {string} character
- * @return {number}
+ * @example
+ *   getLongestRepetition('` foo `` bar `', '`') // 2
+ *
+ * @param {string} value - Content.
+ * @param {string} character - Single character to look
+ *   for.
+ * @return {number} - Number of characters at the place
+ *   where `character` occurs in its longest streak in
+ *   `value`.
  */
 function getLongestRepetition(value, character) {
     var highestCount = 0;
@@ -2679,11 +3907,15 @@ function getLongestRepetition(value, character) {
 }
 
 /**
- * Pad `value` with `level * INDENT` spaces.
+ * Pad `value` with `level * INDENT` spaces.  Respects
+ * lines.
  *
- * @param {string} value
- * @param {number} level
- * @return {string}
+ * @example
+ *   pad('foo', 1) // '    foo'
+ *
+ * @param {string} value - Content.
+ * @param {number} level - Indentation level.
+ * @return {string} - Padded `value`.
  */
 function pad(value, level) {
     var index;
@@ -2692,7 +3924,7 @@ function pad(value, level) {
     value = value.split(LINE);
 
     index = value.length;
-    padding = repeat(level * INDENT, SPACE);
+    padding = repeat(SPACE, level * INDENT);
 
     while (index--) {
         if (value[index].length !== 0) {
@@ -2706,49 +3938,23 @@ function pad(value, level) {
 /**
  * Construct a new compiler.
  *
- * @param {Object?} options
- * @constructor Compiler
+ * @example
+ *   var compiler = new Compiler(new File('> foo.'));
+ *
+ * @constructor
+ * @class {Compiler}
+ * @param {File} file - Virtual file.
+ * @param {Object?} [options] - Passed to
+ *   `Compiler#setOptions()`.
  */
-function Compiler(options) {
+function Compiler(file, options) {
     var self = this;
-    var ruleRepetition;
 
-    self.footnoteCounter = 0;
-    self.linkCounter = 0;
-    self.links = [];
+    self.file = file;
 
-    if (options === null || options === undefined) {
-        options = {};
-    } else if (typeof options !== 'object') {
-        raise(options, 'options');
-    } else {
-        options = copy({}, options);
-    }
+    self.options = clone(self.options);
 
-    validate.map(options, 'bullet', LIST_BULLETS, defaults.bullet);
-    validate.map(options, 'rule', HORIZONTAL_RULE_BULLETS, defaults.rule);
-    validate.map(options, 'emphasis', EMPHASIS_MARKERS, defaults.emphasis);
-    validate.map(options, 'strong', EMPHASIS_MARKERS, defaults.strong);
-    validate.map(options, 'fence', FENCE_MARKERS, defaults.fence);
-    validate.bool(options, 'ruleSpaces', defaults.ruleSpaces);
-    validate.bool(options, 'setext', defaults.setext);
-    validate.bool(options, 'closeAtx', defaults.closeAtx);
-    validate.bool(options, 'looseTable', defaults.looseTable);
-    validate.bool(options, 'spacedTable', defaults.spacedTable);
-    validate.bool(options, 'referenceLinks', defaults.referenceLinks);
-    validate.bool(options, 'fences', defaults.fences);
-    validate.num(options, 'ruleRepetition', defaults.ruleRepetition);
-
-    ruleRepetition = options.ruleRepetition;
-
-    if (
-        ruleRepetition < MINIMUM_RULE_LENGTH ||
-        ruleRepetition !== ruleRepetition
-    ) {
-        raise(ruleRepetition, 'options.ruleRepetition');
-    }
-
-    self.options = options;
+    self.setOptions(options);
 }
 
 /*
@@ -2757,39 +3963,127 @@ function Compiler(options) {
 
 var compilerPrototype = Compiler.prototype;
 
-/**
- * Visit a token.
- *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+/*
+ * Expose defaults.
  */
-compilerPrototype.visit = function (token, parent, level) {
-    if (!level) {
-        level = 0;
+
+compilerPrototype.options = defaultOptions;
+
+/*
+ * Map of applicable enum's.
+ */
+
+var maps = {
+    'entities': ENTITY_OPTIONS,
+    'bullet': LIST_BULLETS,
+    'rule': HORIZONTAL_RULE_BULLETS,
+    'emphasis': EMPHASIS_MARKERS,
+    'strong': EMPHASIS_MARKERS,
+    'fence': FENCE_MARKERS
+};
+
+/**
+ * Set options.  Does not overwrite previously set
+ * options.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *   compiler.setOptions({bullet: '*'});
+ *
+ * @this {Compiler}
+ * @throws {Error} - When an option is invalid.
+ * @param {Object?} [options] - Stringify settings.
+ * @return {Compiler} - `self`.
+ */
+compilerPrototype.setOptions = function (options) {
+    var self = this;
+    var current = self.options;
+    var ruleRepetition;
+    var key;
+
+    if (options === null || options === undefined) {
+        options = {};
+    } else if (typeof options === 'object') {
+        options = clone(options);
+    } else {
+        raise(options, 'options');
     }
 
-    level += 1;
-
-    if (!(token.type in this)) {
-        throw new Error(
-            'Missing compiler for node of type `' +
-            token.type + '`: ' + token
+    for (key in defaultOptions) {
+        validate[typeof current[key]](
+            options, key, current[key], maps[key]
         );
     }
 
-    return this[token.type](token, parent, level);
+    ruleRepetition = options.ruleRepetition;
+
+    if (ruleRepetition && ruleRepetition < MINIMUM_RULE_LENGTH) {
+        raise(ruleRepetition, 'options.ruleRepetition');
+    }
+
+    self.encode = encodeFactory(String(options.entities), self.file);
+
+    self.options = options;
+
+    return self;
+};
+
+/**
+ * Visit a token.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.visit({
+ *     type: 'strong',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '**Foo**'
+ *
+ * @param {Object} token - Node.
+ * @param {Object?} [parent] - `token`s parent node.
+ * @return {string} - Compiled `token`.
+ */
+compilerPrototype.visit = function (token, parent) {
+    var self = this;
+
+    if (typeof self[token.type] !== 'function') {
+        self.file.fail(
+            'Missing compiler for node of type `' +
+            token.type + '`: ' + token,
+            token
+        );
+    }
+
+    return self[token.type](token, parent);
 };
 
 /**
  * Visit all tokens.
  *
- * @param {Object} parent
- * @param {number} level
- * @return {Array.<string>}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.all({
+ *     type: 'strong',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     },
+ *     {
+ *       type: 'text',
+ *       value: 'Bar'
+ *     }]
+ *   });
+ *   // ['Foo', 'Bar']
+ *
+ * @param {Object} parent - Parent node of children.
+ * @return {Array.<string>} - List of compiled children.
  */
-compilerPrototype.visitAll = function (parent, level) {
+compilerPrototype.all = function (parent) {
     var self = this;
     var tokens = parent.children;
     var values = [];
@@ -2797,7 +4091,7 @@ compilerPrototype.visitAll = function (parent, level) {
     var length = tokens.length;
 
     while (++index < length) {
-        values[index] = self.visit(tokens[index], parent, level);
+        values[index] = self.visit(tokens[index], parent);
     }
 
     return values;
@@ -2806,30 +4100,69 @@ compilerPrototype.visitAll = function (parent, level) {
 /**
  * Visit ordered list items.
  *
- * @param {Object} token
- * @param {number} level
- * @return {Array.<string>}
+ * Starts the list with
+ * `token.start` and increments each following list item
+ * bullet by one:
+ *
+ *     2. foo
+ *     3. bar
+ *
+ * In `incrementListMarker: false` mode, does not increment
+ * each marker ans stays on `token.start`:
+ *
+ *     1. foo
+ *     1. bar
+ *
+ * Adds an extra line after an item if it has
+ * `loose: true`.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.visitOrderedItems({
+ *     type: 'list',
+ *     ordered: true,
+ *     children: [{
+ *       type: 'listItem',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // '1.  bar'
+ *
+ * @param {Object} token - `list` node with
+ *   `ordered: true`.
+ * @return {string} - Markdown list.
  */
-compilerPrototype.visitOrderedItems = function (token, level) {
+compilerPrototype.visitOrderedItems = function (token) {
     var self = this;
+    var increment = self.options.incrementListMarker;
     var values = [];
     var tokens = token.children;
     var index = -1;
     var length = tokens.length;
+    var start = token.start;
     var bullet;
     var indent;
     var spacing;
-
-    level = level + 1;
+    var value;
 
     while (++index < length) {
-        bullet = (index + 1) + DOT + SPACE;
+        bullet = (increment ? start + index : start) + DOT + SPACE;
 
         indent = Math.ceil(bullet.length / INDENT) * INDENT;
-        spacing = repeat(indent - bullet.length, SPACE);
+        spacing = repeat(SPACE, indent - bullet.length);
 
-        values[index] = bullet + spacing +
-            self.listItem(tokens[index], token, level, indent);
+        value = bullet + spacing +
+            self.listItem(tokens[index], token, indent);
+
+        if (tokens[index].loose && index !== length - 1) {
+            value += LINE;
+        }
+
+        values[index] = value;
     }
 
     return values.join(LINE);
@@ -2838,11 +4171,32 @@ compilerPrototype.visitOrderedItems = function (token, level) {
 /**
  * Visit unordered list items.
  *
- * @param {Object} token
- * @param {number} level
- * @return {Array.<string>}
+ * Uses `options.bullet` as each item's bullet.
+ *
+ * Adds an extra line after an item if it has
+ * `loose: true`.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.visitUnorderedItems({
+ *     type: 'list',
+ *     ordered: false,
+ *     children: [{
+ *       type: 'listItem',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // '-   bar'
+ *
+ * @param {Object} token - `list` node with
+ *   `ordered: false`.
+ * @return {string} - Markdown list.
  */
-compilerPrototype.visitUnorderedItems = function (token, level) {
+compilerPrototype.visitUnorderedItems = function (token) {
     var self = this;
     var values = [];
     var tokens = token.children;
@@ -2850,8 +4204,7 @@ compilerPrototype.visitUnorderedItems = function (token, level) {
     var length = tokens.length;
     var bullet;
     var spacing;
-
-    level = level + 1;
+    var value;
 
     /*
      * Unordered bullets are always one character, so
@@ -2859,25 +4212,49 @@ compilerPrototype.visitUnorderedItems = function (token, level) {
      */
 
     bullet = self.options.bullet + SPACE;
-    spacing = repeat(HALF, SPACE);
+    spacing = repeat(SPACE, HALF);
 
     while (++index < length) {
-        values[index] = bullet + spacing +
-            self.listItem(tokens[index], token, level, INDENT);
+        value = bullet + spacing +
+            self.listItem(tokens[index], token, INDENT);
+
+        if (tokens[index].loose && index !== length - 1) {
+            value += LINE;
+        }
+
+        values[index] = value;
     }
 
     return values.join(LINE);
 };
 
 /**
- * Stringify a root.
+ * Stringify a block node with block children (e.g., `root`
+ * or `blockquote`).
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * Knows about code following a list, or adjacent lists
+ * with similar bullets, and places an extra newline
+ * between them.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.block({
+ *     type: 'root',
+ *     children: [{
+ *       type: 'paragraph',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // 'bar'
+ *
+ * @param {Object} token - `root` node.
+ * @return {string} - Markdown block content.
  */
-compilerPrototype.root = function (token, parent, level) {
+compilerPrototype.block = function (token) {
     var self = this;
     var values = [];
     var tokens = token.children;
@@ -2894,51 +4271,111 @@ compilerPrototype.root = function (token, parent, level) {
              * Duplicate tokens, such as a list
              * directly following another list,
              * often need multiple new lines.
+             *
+             * Additionally, code blocks following a list
+             * might easily be mistaken for a paragraph
+             * in the list itself.
              */
 
             if (child.type === prev.type && prev.type === 'list') {
-                values.push(prev.ordered === child.ordered ? GAP : LINE);
+                values.push(prev.ordered === child.ordered ? GAP : BREAK);
+            } else if (
+                prev.type === 'list' &&
+                child.type === 'code' &&
+                !child.lang
+            ) {
+                values.push(GAP);
             } else {
                 values.push(BREAK);
             }
         }
 
-        values.push(self.visit(child, token, level));
+        values.push(self.visit(child, token));
 
         prev = child;
     }
 
-    values = values.join(EMPTY);
+    return values.join(EMPTY);
+};
 
-    if (values.charAt(values.length - 1) !== LINE) {
-        values += LINE;
-    }
-
-    return values;
+/**
+ * Stringify a root.
+ *
+ * Adds a final newline to ensure valid POSIX files.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.root({
+ *     type: 'root',
+ *     children: [{
+ *       type: 'paragraph',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // 'bar'
+ *
+ * @param {Object} token - `root` node.
+ * @return {string} - Markdown document.
+ */
+compilerPrototype.root = function (token) {
+    return this.block(token) + LINE;
 };
 
 /**
  * Stringify a heading.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * In `setext: true` mode and when `depth` is smaller than
+ * three, creates a setext header:
+ *
+ *     Foo
+ *     ===
+ *
+ * Otherwise, an ATX header is generated:
+ *
+ *     ### Foo
+ *
+ * In `closeAtx: true` mode, the header is closed with
+ * hashes:
+ *
+ *     ### Foo ###
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.heading({
+ *     type: 'heading',
+ *     depth: 2,
+ *     children: [{
+ *       type: 'strong',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // '## **bar**'
+ *
+ * @param {Object} token - `heading` node.
+ * @return {string} - Markdown heading.
  */
-compilerPrototype.heading = function (token, parent, level) {
+compilerPrototype.heading = function (token) {
     var self = this;
     var setext = self.options.setext;
     var closeAtx = self.options.closeAtx;
     var depth = token.depth;
-    var content = self.visitAll(token, level).join(EMPTY);
+    var content = self.all(token).join(EMPTY);
     var prefix;
 
-    if (setext && (depth === 1 || depth === 2)) {
+    if (setext && depth < 3) {
         return content + LINE +
-            repeat(content.length, depth === 1 ? EQUALS : DASH);
+            repeat(depth === 1 ? EQUALS : DASH, content.length);
     }
 
-    prefix = repeat(token.depth, HASH);
+    prefix = repeat(HASH, token.depth);
     content = prefix + SPACE + content;
 
     if (closeAtx) {
@@ -2951,18 +4388,45 @@ compilerPrototype.heading = function (token, parent, level) {
 /**
  * Stringify text.
  *
- * @param {Object} token
- * @return {string}
+ * Supports named entities in `settings.encode: true` mode:
+ *
+ *     AT&amp;T
+ *
+ * Supports numbered entities in `settings.encode: numbers`
+ * mode:
+ *
+ *     AT&#x26;T
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.text({
+ *     type: 'text',
+ *     value: 'foo'
+ *   });
+ *   // 'foo'
+ *
+ * @param {Object} token - `text` node.
+ * @return {string} - Raw markdown text.
  */
 compilerPrototype.text = function (token) {
-    return token.value;
+    return this.encode(token.value, token);
 };
 
 /**
  * Stringify escaped text.
  *
- * @param {Object} token
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.escape({
+ *     type: 'escape',
+ *     value: '\n'
+ *   });
+ *   // '\\\n'
+ *
+ * @param {Object} token - `escape` node.
+ * @return {string} - Markdown escape.
  */
 compilerPrototype.escape = function (token) {
     return '\\' + token.value;
@@ -2971,97 +4435,118 @@ compilerPrototype.escape = function (token) {
 /**
  * Stringify a paragraph.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.paragraph({
+ *     type: 'paragraph',
+ *     children: [{
+ *       type: 'strong',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // '**bar**'
+ *
+ * @param {Object} token - `paragraph` node.
+ * @return {string} - Markdown paragraph.
  */
-compilerPrototype.paragraph = function (token, parent, level) {
-    return this.visitAll(token, level).join(EMPTY);
+compilerPrototype.paragraph = function (token) {
+    return this.all(token).join(EMPTY);
 };
 
 /**
  * Stringify a block quote.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.paragraph({
+ *     type: 'blockquote',
+ *     children: [{
+ *       type: 'paragraph',
+ *       children: [{
+ *         type: 'strong',
+ *         children: [{
+ *           type: 'text',
+ *           value: 'bar'
+ *         }]
+ *       }]
+ *     }]
+ *   });
+ *   // '> **bar**'
+ *
+ * @param {Object} token - `blockquote` node.
+ * @return {string} - Markdown block quote.
  */
-compilerPrototype.blockquote = function (token, parent, level) {
-    return ANGLE_BRACKET_CLOSE + SPACE + this.visitAll(token, level)
-        .join(BREAK).split(LINE).join(LINE + ANGLE_BRACKET_CLOSE + SPACE);
+compilerPrototype.blockquote = function (token) {
+    var indent = ANGLE_BRACKET_CLOSE + SPACE;
+
+    return indent + this.block(token).split(LINE).join(LINE + indent);
 };
 
 /**
- * Stringify a link.
+ * Stringify a list. See `Compiler#visitOrderedList()` and
+ * `Compiler#visitUnorderedList()` for internal working.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
- */
-compilerPrototype.link = function (token, parent, level) {
-    var self = this;
-    var link = token.href;
-    var value;
-
-    if (!self.options.referenceLinks && needsAngleBraceEnclosure(link)) {
-        link = ANGLE_BRACKET_OPEN + link + ANGLE_BRACKET_CLOSE;
-    }
-
-    value = SQUARE_BRACKET_OPEN +
-        self.visitAll(token, level).join(EMPTY) + SQUARE_BRACKET_CLOSE;
-
-    if (token.title) {
-        link += SPACE + encloseTitle(token.title);
-    }
-
-    if (self.options.referenceLinks) {
-        value += SQUARE_BRACKET_OPEN + (++self.linkCounter) +
-            SQUARE_BRACKET_CLOSE;
-
-        self.links.push(
-            SQUARE_BRACKET_OPEN + self.linkCounter + SQUARE_BRACKET_CLOSE +
-            COLON + SPACE + link
-        );
-    } else {
-        value += PARENTHESIS_OPEN + link + PARENTHESIS_CLOSE;
-    }
-
-    return value;
-};
-
-/**
- * Stringify a list.
+ * @example
+ *   var compiler = new Compiler();
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ *   compiler.visitUnorderedItems({
+ *     type: 'list',
+ *     ordered: false,
+ *     children: [{
+ *       type: 'listItem',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // '-   bar'
+ *
+ * @param {Object} token - `list` node.
+ * @return {string} - Markdown list.
  */
-compilerPrototype.list = function (token, parent, level) {
-    return this[ORDERED_MAP[token.ordered]](token, level);
+compilerPrototype.list = function (token) {
+    return this[ORDERED_MAP[token.ordered]](token);
 };
-
-var CHECKBOX_MAP = {};
-
-CHECKBOX_MAP.null = '';
-CHECKBOX_MAP.undefined = '';
-CHECKBOX_MAP.true = SQUARE_BRACKET_OPEN + 'x' + SQUARE_BRACKET_CLOSE + SPACE;
-CHECKBOX_MAP.false = SQUARE_BRACKET_OPEN + SPACE + SQUARE_BRACKET_CLOSE +
-    SPACE;
 
 /**
  * Stringify a list item.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @param {number} padding
- * @return {string}
+ * Prefixes the content with a checked checkbox when
+ * `checked: true`:
+ *
+ *     [x] foo
+ *
+ * Prefixes the content with an unchecked checkbox when
+ * `checked: false`:
+ *
+ *     [ ] foo
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.listItem({
+ *     type: 'listItem',
+ *     checked: true,
+ *     children: [{
+ *       type: 'text',
+ *       value: 'bar'
+ *     }]
+ *   }, null, null, 4);
+ *   '[x] bar'
+ *
+ * @param {Object} token - `listItem` node.
+ * @param {Object} parent - Parent of `token`.
+ * @param {number} padding - Indentation to use on
+ *   subsequent lines.
+ * @return {string} - Markdown list item (without bullet).
  */
-compilerPrototype.listItem = function (token, parent, level, padding) {
+compilerPrototype.listItem = function (token, parent, padding) {
     var self = this;
     var tokens = token.children;
     var values = [];
@@ -3070,30 +4555,45 @@ compilerPrototype.listItem = function (token, parent, level, padding) {
     var value;
 
     while (++index < length) {
-        values[index] = self.visit(tokens[index], token, level);
+        values[index] = self.visit(tokens[index], token);
     }
 
     value = CHECKBOX_MAP[token.checked] +
         values.join(token.loose ? BREAK : LINE);
 
-    if (token.loose) {
-        value += LINE;
-    }
-
     value = pad(value, padding / INDENT);
 
-    return trimLeft(value);
+    return value.slice(padding);
 };
 
 /**
  * Stringify inline code.
  *
- * @param {Object} token
- * @return {string}
+ * Knows about internal ticks (`\``), and ensures one more
+ * tick is used to enclose the inline code:
+ *
+ *     ```foo ``bar`` baz```
+ *
+ * Even knows about inital and final ticks:
+ *
+ *     `` `foo ``
+ *     `` foo` ``
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.inlineCode({
+ *     type: 'inlineCode',
+ *     value: 'foo(); `bar`; baz()'
+ *   });
+ *   // '``foo(); `bar`; baz()``'
+ *
+ * @param {Object} token - `inlineCode` node.
+ * @return {string} - Markdown inline code.
  */
 compilerPrototype.inlineCode = function (token) {
     var value = token.value;
-    var ticks = repeat(getLongestRepetition(value, TICK) + 1, TICK);
+    var ticks = repeat(TICK, getLongestRepetition(value, TICK) + 1);
     var start = ticks;
     var end = ticks;
 
@@ -3111,11 +4611,20 @@ compilerPrototype.inlineCode = function (token) {
 /**
  * Stringify YAML front matter.
  *
- * @param {Object} token
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.yaml({
+ *     type: 'yaml',
+ *     value: 'foo: bar'
+ *   });
+ *   // '---\nfoo: bar\n---'
+ *
+ * @param {Object} token - `yaml` node.
+ * @return {string} - Markdown YAML document.
  */
 compilerPrototype.yaml = function (token) {
-    var delimiter = repeat(3, DASH);
+    var delimiter = repeat(DASH, YAML_FENCE_LENGTH);
     var value = token.value ? LINE + token.value : EMPTY;
 
     return delimiter + value + LINE + delimiter;
@@ -3124,33 +4633,84 @@ compilerPrototype.yaml = function (token) {
 /**
  * Stringify a code block.
  *
- * @param {Object} token
- * @return {string}
+ * Creates indented code when:
+ *
+ * - No language tag exists;
+ * - Not in `fences: true` mode;
+ * - A non-empty value exists.
+ *
+ * Otherwise, GFM fenced code is created:
+ *
+ *     ```js
+ *     foo();
+ *     ```
+ *
+ * When in ``fence: `~` `` mode, uses tildes as fences:
+ *
+ *     ~~~js
+ *     foo();
+ *     ~~~
+ *
+ * Knows about internal fences (Note: GitHub/Kramdown does
+ * not support this):
+ *
+ *     ````javascript
+ *     ```markdown
+ *     foo
+ *     ```
+ *     ````
+ *
+ * Supports named entities in the language flag with
+ * `settings.encode` mode.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.code({
+ *     type: 'code',
+ *     lang: 'js',
+ *     value: 'fooo();'
+ *   });
+ *   // '```js\nfooo();\n```'
+ *
+ * @param {Object} token - `code` node.
+ * @return {string} - Markdown code block.
  */
 compilerPrototype.code = function (token) {
     var value = token.value;
     var marker = this.options.fence;
+    var language = this.encode(token.lang || EMPTY, token);
     var fence;
 
     /*
      * Probably pedantic.
      */
 
-    if (!token.lang && !this.options.fences && value) {
+    if (!language && !this.options.fences && value) {
         return pad(value, 1);
     }
 
     fence = getLongestRepetition(value, marker) + 1;
 
-    fence = repeat(Math.max(fence, MINIMUM_CODE_FENCE_LENGTH), marker);
+    fence = repeat(marker, Math.max(fence, MINIMUM_CODE_FENCE_LENGTH));
 
-    return fence + (token.lang || EMPTY) + LINE + value + LINE + fence;
+    return fence + language + LINE + value + LINE + fence;
 };
 
 /**
  * Stringify HTML.
  *
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.html({
+ *     type: 'html',
+ *     value: '<div>bar</div>'
+ *   });
+ *   // '<div>bar</div>'
+ *
+ * @param {Object} token - `html` node.
+ * @return {string} - Markdown HTML.
  */
 compilerPrototype.html = function (token) {
     return token.value;
@@ -3159,11 +4719,33 @@ compilerPrototype.html = function (token) {
 /**
  * Stringify a horizontal rule.
  *
- * @return {string}
+ * The character used is configurable by `rule`: (`'_'`)
+ *
+ *     ___
+ *
+ * The number of repititions is defined through
+ * `ruleRepetition`: (`6`)
+ *
+ *     ******
+ *
+ * Whether spaces delimit each character, is configured
+ * through `ruleSpaces`: (`true`)
+ *
+ *     * * *
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.horizontalRule({
+ *     type: 'horizontalRule'
+ *   });
+ *   // '***'
+ *
+ * @return {string} - Markdown rule.
  */
 compilerPrototype.horizontalRule = function () {
     var options = this.options;
-    var rule = repeat(options.ruleRepetition, options.rule);
+    var rule = repeat(options.rule, options.ruleRepetition);
 
     if (options.ruleSpaces) {
         rule = rule.split(EMPTY).join(SPACE);
@@ -3175,79 +4757,364 @@ compilerPrototype.horizontalRule = function () {
 /**
  * Stringify a strong.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * The marker used is configurable by `strong`, which
+ * defaults to an asterisk (`'*'`) but also accepts an
+ * underscore (`'_'`):
+ *
+ *     _foo_
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.strong({
+ *     type: 'strong',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '**Foo**'
+ *
+ * @param {Object} token - `strong` node.
+ * @return {string} - Markdown strong-emphasised text.
  */
-compilerPrototype.strong = function (token, parent, level) {
+compilerPrototype.strong = function (token) {
     var marker = this.options.strong;
 
     marker = marker + marker;
 
-    return marker + this.visitAll(token, level).join(EMPTY) + marker;
+    return marker + this.all(token).join(EMPTY) + marker;
 };
 
 /**
  * Stringify an emphasis.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * The marker used is configurable by `emphasis`, which
+ * defaults to an underscore (`'_'`) but also accepts an
+ * asterisk (`'*'`):
+ *
+ *     *foo*
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.emphasis({
+ *     type: 'emphasis',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '_Foo_'
+ *
+ * @param {Object} token - `emphasis` node.
+ * @return {string} - Markdown emphasised text.
  */
-compilerPrototype.emphasis = function (token, parent, level) {
+compilerPrototype.emphasis = function (token) {
     var marker = this.options.emphasis;
 
-    return marker + this.visitAll(token, level).join(EMPTY) + marker;
+    return marker + this.all(token).join(EMPTY) + marker;
 };
 
 /**
- * Stringify a break.
+ * Stringify a hard break.
  *
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.break({
+ *     type: 'break'
+ *   });
+ *   // '  \n'
+ *
+ * @return {string} - Hard markdown break.
  */
 compilerPrototype.break = function () {
-    return LINE;
+    return SPACE + SPACE + LINE;
 };
 
 /**
  * Stringify a delete.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.delete({
+ *     type: 'delete',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '~~Foo~~'
+ *
+ * @param {Object} token - `delete` node.
+ * @return {string} - Markdown strike-through.
  */
-compilerPrototype.delete = function (token, parent, level) {
-    return DOUBLE_TILDE +
-        this.visitAll(token, level).join(EMPTY) + DOUBLE_TILDE;
+compilerPrototype.delete = function (token) {
+    return DOUBLE_TILDE + this.all(token).join(EMPTY) + DOUBLE_TILDE;
+};
+
+/**
+ * Stringify a link.
+ *
+ * When no title exists, the compiled `children` equal
+ * `href`, and `href` starts with a protocol, an auto
+ * link is created:
+ *
+ *     <http://example.com>
+ *
+ * Otherwise, is smart about enclosing `href` (see
+ * `encloseURI()`) and `title` (see `encloseTitle()`).
+ *
+ *    [foo](<foo at bar dot com> 'An "example" e-mail')
+ *
+ * Supports named entities in the `href` and `title` when
+ * in `settings.encode` mode.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.link({
+ *     type: 'link',
+ *     href: 'http://example.com',
+ *     title: 'Example Domain',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '[Foo](http://example.com "Example Domain")'
+ *
+ * @param {Object} token - `link` node.
+ * @return {string} - Markdown link.
+ */
+compilerPrototype.link = function (token) {
+    var self = this;
+    var url = self.encode(token.href, token);
+    var value = self.all(token).join(EMPTY);
+
+    if (
+        token.title === null &&
+        PROTOCOL.test(url) &&
+        (url === value || url === MAILTO + value)
+    ) {
+        return encloseURI(url, true);
+    }
+
+    url = encloseURI(url);
+
+    if (token.title) {
+        url += SPACE + encloseTitle(self.encode(token.title, token));
+    }
+
+    value = SQUARE_BRACKET_OPEN + value + SQUARE_BRACKET_CLOSE;
+
+    value += PARENTHESIS_OPEN + url + PARENTHESIS_CLOSE;
+
+    return value;
+};
+
+/**
+ * Stringify a link label.
+ *
+ * Because link references are easily, mistakingly,
+ * created (for example, `[foo]`), reference nodes have
+ * an extra property depicting how it looked in the
+ * original document, so stringification can cause minimal
+ * changes.
+ *
+ * @example
+ *   label({
+ *     type: 'referenceImage',
+ *     referenceType: 'full',
+ *     identifier: 'foo'
+ *   });
+ *   // '[foo]'
+ *
+ *   label({
+ *     type: 'referenceImage',
+ *     referenceType: 'collapsed',
+ *     identifier: 'foo'
+ *   });
+ *   // '[]'
+ *
+ *   label({
+ *     type: 'referenceImage',
+ *     referenceType: 'shortcut',
+ *     identifier: 'foo'
+ *   });
+ *   // ''
+ *
+ * @param {Object} token - `linkReference` or
+ *   `imageReference` node.
+ * @return {string} - Markdown label reference.
+ */
+function label(token) {
+    var value = EMPTY;
+    var type = token.referenceType;
+
+    if (type === 'full') {
+        value = token.identifier;
+    }
+
+    if (type !== 'shortcut') {
+        value = SQUARE_BRACKET_OPEN + value + SQUARE_BRACKET_CLOSE;
+    }
+
+    return value;
+}
+
+/**
+ * Stringify a link reference.
+ *
+ * See `label()` on how reference labels are created.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.linkReference({
+ *     type: 'linkReference',
+ *     referenceType: 'collapsed',
+ *     identifier: 'foo',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '[Foo][]'
+ *
+ * @param {Object} token - `linkReference` node.
+ * @return {string} - Markdown link reference.
+ */
+compilerPrototype.linkReference = function (token) {
+    return SQUARE_BRACKET_OPEN +
+        this.all(token).join(EMPTY) + SQUARE_BRACKET_CLOSE +
+        label(token);
+};
+
+/**
+ * Stringify an image reference.
+ *
+ * See `label()` on how reference labels are created.
+ *
+ * Supports named entities in the `alt` when
+ * in `settings.encode` mode.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.imageReference({
+ *     type: 'imageReference',
+ *     referenceType: 'full',
+ *     identifier: 'foo',
+ *     alt: 'Foo'
+ *   });
+ *   // '![Foo][foo]'
+ *
+ * @param {Object} token - `imageReference` node.
+ * @return {string} - Markdown image reference.
+ */
+compilerPrototype.imageReference = function (token) {
+    var alt = this.encode(token.alt, token);
+
+    return EXCLAMATION_MARK +
+        SQUARE_BRACKET_OPEN + alt + SQUARE_BRACKET_CLOSE +
+        label(token);
+};
+
+/**
+ * Stringify a footnote reference.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.footnoteReference({
+ *     type: 'footnoteReference',
+ *     identifier: 'foo'
+ *   });
+ *   // '[^foo]'
+ *
+ * @param {Object} token - `footnoteReference` node.
+ * @return {string} - Markdown footnote reference.
+ */
+compilerPrototype.footnoteReference = function (token) {
+    return SQUARE_BRACKET_OPEN + CARET + token.identifier +
+        SQUARE_BRACKET_CLOSE;
+};
+
+/**
+ * Stringify an link- or image definition.
+ *
+ * Is smart about enclosing `href` (see `encloseURI()`) and
+ * `title` (see `encloseTitle()`).
+ *
+ *    [foo]: <foo at bar dot com> 'An "example" e-mail'
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.definition({
+ *     type: 'definition',
+ *     link: 'http://example.com',
+ *     title: 'Example Domain',
+ *     identifier: 'foo'
+ *   });
+ *   // '[foo]: http://example.com "Example Domain"'
+ *
+ * @param {Object} token - `definition` node.
+ * @return {string} - Markdown link- or image definition.
+ */
+compilerPrototype.definition = function (token) {
+    var value = SQUARE_BRACKET_OPEN + token.identifier + SQUARE_BRACKET_CLOSE;
+    var url = encloseURI(token.link);
+
+    if (token.title) {
+        url += SPACE + encloseTitle(token.title);
+    }
+
+    return value + COLON + SPACE + url;
 };
 
 /**
  * Stringify an image.
  *
- * @param {Object} token
- * @return {string}
+ * Is smart about enclosing `href` (see `encloseURI()`) and
+ * `title` (see `encloseTitle()`).
+ *
+ *    ![foo](</fav icon.png> 'My "favourite" icon')
+ *
+ * Supports named entities in `src`, `alt`, and `title`
+ * when in `settings.encode` mode.
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.image({
+ *     type: 'image',
+ *     href: 'http://example.png/favicon.png',
+ *     title: 'Example Icon',
+ *     alt: 'Foo'
+ *   });
+ *   // '![Foo](http://example.png/favicon.png "Example Icon")'
+ *
+ * @param {Object} token - `image` node.
+ * @return {string} - Markdown image.
  */
 compilerPrototype.image = function (token) {
-    var source = token.src;
+    var encode = this.encode;
+    var url = encloseURI(encode(token.src, token));
     var value;
 
-    if (needsAngleBraceEnclosure(source)) {
-        source = ANGLE_BRACKET_OPEN + source + ANGLE_BRACKET_CLOSE;
+    if (token.title) {
+        url += SPACE + encloseTitle(encode(token.title, token));
     }
 
-    value = EXCLAMATION_MARK + SQUARE_BRACKET_OPEN + (token.alt || EMPTY) +
+    value = EXCLAMATION_MARK +
+        SQUARE_BRACKET_OPEN + encode(token.alt || EMPTY, token) +
         SQUARE_BRACKET_CLOSE;
 
-    value += PARENTHESIS_OPEN + source;
-
-    if (token.title) {
-        value += SPACE + encloseTitle(token.title);
-    }
-
-    value += PARENTHESIS_CLOSE;
+    value += PARENTHESIS_OPEN + url + PARENTHESIS_CLOSE;
 
     return value;
 };
@@ -3255,32 +5122,130 @@ compilerPrototype.image = function (token) {
 /**
  * Stringify a footnote.
  *
- * @param {Object} token
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.footnote({
+ *     type: 'footnote',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   });
+ *   // '[^Foo]'
+ *
+ * @param {Object} token - `footnote` node.
+ * @return {string} - Markdown footnote.
  */
 compilerPrototype.footnote = function (token) {
-    return SQUARE_BRACKET_OPEN + CARET + token.id + SQUARE_BRACKET_CLOSE;
+    return SQUARE_BRACKET_OPEN + CARET + this.all(token).join(EMPTY) +
+        SQUARE_BRACKET_CLOSE;
 };
 
 /**
  * Stringify a footnote definition.
  *
- * @param {Object} token
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.footnoteDefinition({
+ *     type: 'footnoteDefinition',
+ *     identifier: 'foo',
+ *     children: [{
+ *       type: 'paragraph',
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   });
+ *   // '[^foo]: bar'
+ *
+ * @param {Object} token - `footnoteDefinition` node.
+ * @return {string} - Markdown footnote definition.
  */
 compilerPrototype.footnoteDefinition = function (token) {
-    return this.visitAll(token).join(BREAK + repeat(INDENT, SPACE));
+    var id = token.identifier.toLowerCase();
+
+    return SQUARE_BRACKET_OPEN + CARET + id +
+        SQUARE_BRACKET_CLOSE + COLON + SPACE +
+        this.all(token).join(BREAK + repeat(SPACE, INDENT));
 };
 
 /**
  * Stringify table.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * Creates a fenced table by default, but not in
+ * `looseTable: true` mode:
+ *
+ *     Foo | Bar
+ *     :-: | ---
+ *     Baz | Qux
+ *
+ * NOTE: Be careful with `looseTable: true` mode, as a
+ * loose table inside an indented code block on GitHub
+ * renders as an actual table!
+ *
+ * Creates a spaces table by default, but not in
+ * `spacedTable: false`:
+ *
+ *     |Foo|Bar|
+ *     |:-:|---|
+ *     |Baz|Qux|
+ *
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.table({
+ *     type: 'table',
+ *     align: ['center', null],
+ *     children: [
+ *       {
+ *         type: 'tableHeader',
+ *         children: [
+ *           {
+ *             type: 'tableCell'
+ *             children: [{
+ *               type: 'text'
+ *               value: 'Foo'
+ *             }]
+ *           },
+ *           {
+ *             type: 'tableCell'
+ *             children: [{
+ *               type: 'text'
+ *               value: 'Bar'
+ *             }]
+ *           }
+ *         ]
+ *       },
+ *       {
+ *         type: 'tableRow',
+ *         children: [
+ *           {
+ *             type: 'tableCell'
+ *             children: [{
+ *               type: 'text'
+ *               value: 'Baz'
+ *             }]
+ *           },
+ *           {
+ *             type: 'tableCell'
+ *             children: [{
+ *               type: 'text'
+ *               value: 'Qux'
+ *             }]
+ *           }
+ *         ]
+ *       }
+ *     ]
+ *   });
+ *   // '| Foo | Bar |\n| :-: | --- |\n| Baz | Qux |'
+ *
+ * @param {Object} token - `table` node.
+ * @return {string} - Markdown table.
  */
-compilerPrototype.table = function (token, parent, level) {
+compilerPrototype.table = function (token) {
     var self = this;
     var loose = self.options.looseTable;
     var spaced = self.options.spacedTable;
@@ -3290,19 +5255,13 @@ compilerPrototype.table = function (token, parent, level) {
     var start;
 
     while (index--) {
-        result[index] = self.visitAll(rows[index], level);
+        result[index] = self.all(rows[index]);
     }
 
     start = loose ? EMPTY : spaced ? PIPE + SPACE : PIPE;
 
-    /*
-     * There was a bug in markdown-table@0.3.0, fixed
-     * in markdown-table@0.3.1, which modified the `align`
-     * array, changing the AST.
-     */
-
     return table(result, {
-        'align': token.align.concat(),
+        'align': token.align,
         'start': start,
         'end': start.split(EMPTY).reverse().join(EMPTY),
         'delimiter': spaced ? SPACE + PIPE + SPACE : PIPE
@@ -3312,81 +5271,48 @@ compilerPrototype.table = function (token, parent, level) {
 /**
  * Stringify a table cell.
  *
- * @param {Object} token
- * @param {Object} parent
- * @param {number} level
- * @return {string}
+ * @example
+ *   var compiler = new Compiler();
+ *
+ *   compiler.tableCell({
+ *     type: 'tableCell',
+ *     children: [{
+ *       type: 'text'
+ *       value: 'Qux'
+ *     }]
+ *   });
+ *   // 'Qux'
+ *
+ * @param {Object} token - `tableCell` node.
+ * @return {string} - Markdown table cell.
  */
-compilerPrototype.tableCell = function (token, parent, level) {
-    return this.visitAll(token, level).join(EMPTY);
+compilerPrototype.tableCell = function (token) {
+    return this.all(token).join(EMPTY);
 };
 
 /**
- * Visit the footnote definition block.
+ * Stringify an abstract syntax tree.
  *
- * @param {Object} footnotes
- * @return {string}
- */
-compilerPrototype.visitFootnoteDefinitions = function (footnotes) {
-    var self = this;
-    var keys = getKeys(footnotes);
-    var index = -1;
-    var length = keys.length;
-    var results = [];
-    var key;
-
-    if (!length) {
-        return EMPTY;
-    }
-
-    while (++index < length) {
-        key = keys[index];
-
-        results.push(
-            SQUARE_BRACKET_OPEN + CARET + key + SQUARE_BRACKET_CLOSE +
-            COLON + SPACE + self.visit(footnotes[key], null)
-        );
-    }
-
-    return LINE + results.join(LINE) + LINE;
-};
-
-/**
- * Stringify an ast.
+ * @example
+ *   stringify({
+ *     type: 'strong',
+ *     children: [{
+ *       type: 'text',
+ *       value: 'Foo'
+ *     }]
+ *   }, new File());
+ *   // '**Foo**'
  *
- * @param {Object} ast
- * @param {Object?} options
- * @param {Function?} CustomCompiler
- * @return {string}
+ * @param {Object} ast - A node, most commonly, `root`.
+ * @param {File} file - Virtual file.
+ * @param {Object?} [options] - Passed to
+ *   `Compiler#setOptions()`.
+ * @return {string} - Markdown document.
  */
-function stringify(ast, options, CustomCompiler) {
-    var compiler;
-    var footnotes;
-    var value;
+function stringify(ast, file, options) {
+    var CustomCompiler = this.Compiler || Compiler;
 
-    if (!CustomCompiler) {
-        CustomCompiler = this.Compiler || Compiler;
-    }
-
-    compiler = new CustomCompiler(options);
-
-    if (ast && ast.footnotes) {
-        footnotes = copy({}, ast.footnotes);
-
-        compiler.footnotes = footnotes;
-    }
-
-    value = compiler.visit(ast);
-
-    if (compiler.links.length) {
-        value += LINE + compiler.links.join(LINE) + LINE;
-    }
-
-    if (footnotes) {
-        value += compiler.visitFootnoteDefinitions(footnotes);
-    }
-
-    return value;
+    return new CustomCompiler(file, options).visit(ast);
 }
 
 /*
@@ -3401,11 +5327,19 @@ stringify.Compiler = Compiler;
 
 module.exports = stringify;
 
-},{"./defaults.js":3,"./utilities.js":7,"markdown-table":9}],7:[function(require,module,exports){
+},{"./defaults.js":3,"./utilities.js":8,"he":9,"markdown-table":10,"repeat-string":11}],8:[function(require,module,exports){
+/**
+ * @author Titus Wormer
+ * @copyright 2015 Titus Wormer. All rights reserved.
+ * @module Utilities
+ * @fileoverview Collection of tiny helpers useful for
+ *   both parsing and compiling markdown.
+ */
+
 'use strict';
 
 /*
- * Cached methods.
+ * Methods.
  */
 
 var has = Object.prototype.hasOwnProperty;
@@ -3415,18 +5349,23 @@ var has = Object.prototype.hasOwnProperty;
  */
 
 var WHITE_SPACE_FINAL = /\s+$/;
-var NEW_LINE_FINAL = /\n+$/;
+var NEW_LINES_FINAL = /\n+$/;
 var WHITE_SPACE_INITIAL = /^\s+/;
 var EXPRESSION_LINE_BREAKS = /\r\n|\r/g;
 var EXPRESSION_SYMBOL_FOR_NEW_LINE = /\u2424/g;
 var WHITE_SPACE_COLLAPSABLE = /[ \t\n]+/g;
+var EXPRESSION_BOM = /^\ufeff/;
 
 /**
  * Shallow copy `context` into `target`.
  *
- * @param {Object} target
- * @return {Object} context
- * @return {Object} - target.
+ * @example
+ *   var target = {};
+ *   copy(target, {foo: 'bar'}); // target
+ *
+ * @param {Object} target - Object to copy into.
+ * @param {Object} context - Object to copy from.
+ * @return {Object} - `target`.
  */
 function copy(target, context) {
     var key;
@@ -3443,8 +5382,12 @@ function copy(target, context) {
 /**
  * Shallow clone `context`.
  *
- * @return {Object|Array} context
- * @return {Object|Array}
+ * @example
+ *   clone({foo: 'bar'}) // {foo: 'bar'}
+ *   clone(['foo', 'bar']) // ['foo', 'bar']
+ *
+ * @return {Object|Array} context - Object to clone.
+ * @return {Object|Array} - Shallow clone of `context`.
  */
 function clone(context) {
     if ('concat' in context) {
@@ -3455,30 +5398,37 @@ function clone(context) {
 }
 
 /**
- * Throw an exception with in its message the value,
- * and its name.
+ * Throw an exception with in its `message` `value`
+ * and `name`.
  *
- * @param {*} value
- * @param {string} name
+ * @param {*} value - Invalid value.
+ * @param {string} name - Setting name.
  */
 function raise(value, name) {
     throw new Error(
         'Invalid value `' + value + '` ' +
-        'for `' + name + '`'
+        'for setting `' + name + '`'
     );
 }
 
 /**
  * Validate a value to be boolean. Defaults to `def`.
- * Raises an exception with `options.$name` when not
+ * Raises an exception with `context[name]` when not
  * a boolean.
  *
- * @param {Object} obj
- * @param {string} name
- * @param {boolean} def
+ * @example
+ *   validateBoolean({foo: null}, 'foo', true) // true
+ *   validateBoolean({foo: false}, 'foo', true) // false
+ *   validateBoolean({foo: 'bar'}, 'foo', true) // Throws
+ *
+ * @throws {Error} - When a setting is neither omitted nor
+ *   a boolean.
+ * @param {Object} context - Settings.
+ * @param {string} name - Setting name.
+ * @param {boolean} def - Default value.
  */
-function validateBoolean(obj, name, def) {
-    var value = obj[name];
+function validateBoolean(context, name, def) {
+    var value = context[name];
 
     if (value === null || value === undefined) {
         value = def;
@@ -3488,44 +5438,59 @@ function validateBoolean(obj, name, def) {
         raise(value, 'options.' + name);
     }
 
-    obj[name] = value;
+    context[name] = value;
 }
 
 /**
  * Validate a value to be boolean. Defaults to `def`.
- * Raises an exception with `options.$name` when not
+ * Raises an exception with `context[name]` when not
  * a boolean.
  *
- * @param {Object} obj
- * @param {string} name
- * @param {number} def
+ * @example
+ *   validateNumber({foo: null}, 'foo', 1) // 1
+ *   validateNumber({foo: 2}, 'foo', 1) // 2
+ *   validateNumber({foo: 'bar'}, 'foo', 1) // Throws
+ *
+ * @throws {Error} - When a setting is neither omitted nor
+ *   a number.
+ * @param {Object} context - Settings.
+ * @param {string} name - Setting name.
+ * @param {number} def - Default value.
  */
-function validateNumber(obj, name, def) {
-    var value = obj[name];
+function validateNumber(context, name, def) {
+    var value = context[name];
 
     if (value === null || value === undefined) {
         value = def;
     }
 
-    if (typeof value !== 'number') {
+    if (typeof value !== 'number' || value !== value) {
         raise(value, 'options.' + name);
     }
 
-    obj[name] = value;
+    context[name] = value;
 }
 
 /**
  * Validate a value to be in `map`. Defaults to `def`.
- * Raises an exception with `options.$name` when not
+ * Raises an exception with `context[name]` when not
  * not in `map`.
  *
- * @param {Object} obj
- * @param {string} name
- * @param {Object} map
- * @param {boolean} def
+ * @example
+ *   var map = {bar: true, baz: true};
+ *   validateString({foo: null}, 'foo', 'bar', map) // 'bar'
+ *   validateString({foo: 'baz'}, 'foo', 'bar', map) // 'baz'
+ *   validateString({foo: true}, 'foo', 'bar', map) // Throws
+ *
+ * @throws {Error} - When a setting is neither omitted nor
+ *   in `map`.
+ * @param {Object} context - Settings.
+ * @param {string} name - Setting name.
+ * @param {string} def - Default value.
+ * @param {Object} map - Enum.
  */
-function validateMap(obj, name, map, def) {
-    var value = obj[name];
+function validateString(context, name, def, map) {
+    var value = context[name];
 
     if (value === null || value === undefined) {
         value = def;
@@ -3535,14 +5500,17 @@ function validateMap(obj, name, map, def) {
         raise(value, 'options.' + name);
     }
 
-    obj[name] = value;
+    context[name] = value;
 }
 
 /**
  * Remove final white space from `value`.
  *
- * @param {string} value
- * @return {string}
+ * @example
+ *   trimRight('foo '); // 'foo'
+ *
+ * @param {string} value - Content to trim.
+ * @return {string} - Trimmed content.
  */
 function trimRight(value) {
     return String(value).replace(WHITE_SPACE_FINAL, '');
@@ -3551,18 +5519,24 @@ function trimRight(value) {
 /**
  * Remove final new line characters from `value`.
  *
- * @param {string} value
- * @return {string}
+ * @example
+ *   trimRightLines('foo\n\n'); // 'foo'
+ *
+ * @param {string} value - Content to trim.
+ * @return {string} - Trimmed content.
  */
 function trimRightLines(value) {
-    return String(value).replace(NEW_LINE_FINAL, '');
+    return String(value).replace(NEW_LINES_FINAL, '');
 }
 
 /**
  * Remove initial white space from `value`.
  *
- * @param {string} value
- * @return {string}
+ * @example
+ *   trimLeft(' foo'); // 'foo'
+ *
+ * @param {string} value - Content to trim.
+ * @return {string} - Trimmed content.
  */
 function trimLeft(value) {
     return String(value).replace(WHITE_SPACE_INITIAL, '');
@@ -3571,8 +5545,11 @@ function trimLeft(value) {
 /**
  * Remove initial and final white space from `value`.
  *
- * @param {string} value
- * @return {string}
+ * @example
+ *   trim(' foo '); // 'foo'
+ *
+ * @param {string} value - Content to trim.
+ * @return {string} - Trimmed content.
  */
 function trim(value) {
     return trimLeft(trimRight(value));
@@ -3581,8 +5558,11 @@ function trim(value) {
 /**
  * Collapse white space.
  *
- * @param {string} value
- * @return {string}
+ * @example
+ *   collapse('foo\t bar'); // 'foo bar'
+ *
+ * @param {string} value - Content to collapse.
+ * @return {string} - Collapsed content.
  */
 function collapse(value) {
     return String(value).replace(WHITE_SPACE_COLLAPSABLE, ' ');
@@ -3591,56 +5571,45 @@ function collapse(value) {
 /**
  * Clean a string in preperation of parsing.
  *
- * @param {string} value
- * @return {string}
+ * @example
+ *   clean('\ufefffoo'); // 'foo'
+ *   clean('foo\r\nbar'); // 'foo\nbar'
+ *   clean('foo\u2424bar'); // 'foo\nbar'
+ *
+ * @param {string} value - Content to clean.
+ * @return {string} - Cleaned content.
  */
 function clean(value) {
     return String(value)
+        .replace(EXPRESSION_BOM, '')
         .replace(EXPRESSION_LINE_BREAKS, '\n')
         .replace(EXPRESSION_SYMBOL_FOR_NEW_LINE, '\n');
 }
 
 /**
- * Repeat `character` `times` times.
+ * Normalize an identifier.  Collapses multiple white space
+ * characters into a single space, and removes casing.
  *
- * @param {number} times
- * @param {string} character
- * @return {string}
- */
-function repeat(times, character) {
-    var result = '';
-
-    while (times > 0) {
-        if (times % 2 === 1) {
-            result += character;
-        }
-
-        character += character;
-
-        times >>= 1;
-    }
-
-    return result;
-}
-
-/**
- * Normalize an reference identifier.  Collapses
- * multiple white space characters into a single space,
- * and removes casing.
+ * @example
+ *   normalizeIdentifier('FOO\t bar'); // 'foo bar'
  *
- * @param {string} value
- * @return {string}
+ * @param {string} value - Content to normalize.
+ * @return {string} - Normalized content.
  */
-function normalizeReference(value) {
+function normalizeIdentifier(value) {
     return collapse(value).toLowerCase();
 }
 
 /**
  * Count how many characters `character` occur in `value`.
  *
- * @param {string} value
- * @param {string} character
- * @return {number}
+ * @example
+ *   countCharacter('foo(bar(baz)', '(') // 2
+ *   countCharacter('foo(bar(baz)', ')') // 1
+ *
+ * @param {string} value - Content to search in.
+ * @param {string} character - Character to search for.
+ * @return {number} - Count.
  */
 function countCharacter(value, character) {
     var index = -1;
@@ -3656,18 +5625,48 @@ function countCharacter(value, character) {
     return count;
 }
 
+/**
+ * Create an empty object.
+ *
+ * @example
+ *   objectObject(); // Same as `{}`.
+ *
+ * @return {Object}
+ */
+function objectObject() {
+    return {};
+}
+
+/*
+ * Break coverage.
+ */
+
+objectObject();
+
+/**
+ * Create an object without prototype.
+ *
+ * @example
+ *   objectNull(); // New object without prototype.
+ *
+ * @return {Object}
+ */
+function objectNull() {
+    return Object.create(null);
+}
+
 /*
  * Expose `validate`.
  */
 
 exports.validate = {
-    'bool': validateBoolean,
-    'map': validateMap,
-    'num': validateNumber
+    'boolean': validateBoolean,
+    'string': validateString,
+    'number': validateNumber
 };
 
 /*
- * Expose string methods.
+ * Expose.
  */
 
 exports.trim = trim;
@@ -3675,15 +5674,21 @@ exports.trimLeft = trimLeft;
 exports.trimRight = trimRight;
 exports.trimRightLines = trimRightLines;
 exports.collapse = collapse;
-exports.normalizeReference = normalizeReference;
+exports.normalizeIdentifier = normalizeIdentifier;
 exports.clean = clean;
 exports.raise = raise;
 exports.copy = copy;
 exports.clone = clone;
-exports.repeat = repeat;
 exports.countCharacter = countCharacter;
 
-},{}],8:[function(require,module,exports){
+/* istanbul ignore else */
+if ('create' in Object) {
+    exports.create = objectNull;
+} else {
+    exports.create = objectObject;
+}
+
+},{}],9:[function(require,module,exports){
 (function (global){
 /*! http://mths.be/he v0.5.0 by @mathias | MIT license */
 ;(function(root) {
@@ -4016,52 +6021,37 @@ exports.countCharacter = countCharacter;
 }(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],9:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 'use strict';
 
 /*
  * Useful expressions.
  */
 
-var EXPRESSION_DOT,
-    EXPRESSION_LAST_DOT;
-
-EXPRESSION_DOT = /\./;
-
-EXPRESSION_LAST_DOT = /\.[^.]*$/;
+var EXPRESSION_DOT = /\./;
+var EXPRESSION_LAST_DOT = /\.[^.]*$/;
 
 /*
  * Allowed alignment values.
  */
 
-var LEFT,
-    RIGHT,
-    CENTER,
-    DOT,
-    ALLIGNMENT;
+var LEFT = 'l';
+var RIGHT = 'r';
+var CENTER = 'c';
+var DOT = '.';
+var NULL = '';
 
-LEFT = 'l';
-RIGHT = 'r';
-CENTER = 'c';
-DOT = '.';
-
-ALLIGNMENT = [LEFT, RIGHT, CENTER, DOT];
+var ALLIGNMENT = [LEFT, RIGHT, CENTER, DOT, NULL];
 
 /*
  * Characters.
  */
 
-var COLON,
-    DASH,
-    PIPE,
-    SPACE,
-    NEW_LINE;
-
-COLON = ':';
-DASH = '-';
-PIPE = '|';
-SPACE = ' ';
-NEW_LINE = '\n';
+var COLON = ':';
+var DASH = '-';
+var PIPE = '|';
+var SPACE = ' ';
+var NEW_LINE = '\n';
 
 /**
  * Get the length of `value`.
@@ -4069,7 +6059,7 @@ NEW_LINE = '\n';
  * @param {string} value
  * @return {number}
  */
-function calculateStringLengthNoop(value) {
+function lengthNoop(value) {
     return String(value).length;
 }
 
@@ -4091,9 +6081,7 @@ function pad(length, character) {
  * @return {number}
  */
 function dotindex(value) {
-    var match;
-
-    match = EXPRESSION_LAST_DOT.exec(value);
+    var match = EXPRESSION_LAST_DOT.exec(value);
 
     return match ? match.index + 1 : value.length;
 }
@@ -4112,63 +6100,42 @@ function dotindex(value) {
  * @return {string} Pretty table
  */
 function markdownTable(table, options) {
-    var delimiter,
-        start,
-        end,
-        alignment,
-        align,
-        rule,
-        calculateStringLength,
-        sizes,
-        rows,
-        rowIndex,
-        rowLength,
-        row,
-        cells,
-        cellCount,
-        index,
-        position,
-        size,
-        value,
-        spacing,
-        before,
-        after;
+    var settings = options || {};
+    var delimiter = settings.delimiter;
+    var start = settings.start;
+    var end = settings.end;
+    var alignment = settings.align;
+    var calculateStringLength = settings.stringLength || lengthNoop;
+    var cellCount = 0;
+    var rowIndex = -1;
+    var rowLength = table.length;
+    var sizes = [];
+    var align;
+    var rule;
+    var rows;
+    var row;
+    var cells;
+    var index;
+    var position;
+    var size;
+    var value;
+    var spacing;
+    var before;
+    var after;
 
-    if (!options) {
-        options = {};
-    }
-
-    delimiter = options.delimiter;
+    alignment = alignment ? alignment.concat() : [];
 
     if (delimiter === null || delimiter === undefined) {
         delimiter = SPACE + PIPE + SPACE;
     }
 
-    start = options.start;
-
     if (start === null || start === undefined) {
         start = PIPE + SPACE;
     }
 
-    end = options.end;
-
     if (end === null || end === undefined) {
         end = SPACE + PIPE;
     }
-
-    if (options.align) {
-        alignment = options.align.concat();
-    } else {
-        alignment = [];
-    }
-
-    calculateStringLength = options.stringLength || calculateStringLengthNoop;
-
-    rowIndex = -1;
-    rowLength = table.length;
-    cellCount = 0;
-
-    sizes = [];
 
     while (++rowIndex < rowLength) {
         row = table[rowIndex];
@@ -4210,7 +6177,7 @@ function markdownTable(table, options) {
         }
 
         if (ALLIGNMENT.indexOf(align) === -1) {
-            align = LEFT;
+            align = NULL;
         }
 
         alignment[index] = align;
@@ -4310,7 +6277,7 @@ function markdownTable(table, options) {
         rows[rowIndex] = cells.join(delimiter);
     }
 
-    if (options.rule !== false) {
+    if (settings.rule !== false) {
         index = -1;
         rule = [];
 
@@ -4321,9 +6288,9 @@ function markdownTable(table, options) {
              * When `align` is left, don't add colons.
              */
 
-            value = align !== LEFT && align !== RIGHT ? COLON : DASH;
+            value = align === RIGHT || align === NULL ? DASH : COLON;
             value += pad(sizes[index] - 2, DASH);
-            value += align !== LEFT ? COLON : DASH;
+            value += align !== LEFT && align !== NULL ? COLON : DASH;
 
             rule[index] = value;
         }
@@ -4340,7 +6307,75 @@ function markdownTable(table, options) {
 
 module.exports = markdownTable;
 
-},{}],10:[function(require,module,exports){
+},{}],11:[function(require,module,exports){
+/*!
+ * repeat-string <https://github.com/jonschlinkert/repeat-string>
+ *
+ * Copyright (c) 2014-2015, Jon Schlinkert.
+ * Licensed under the MIT License.
+ */
+
+'use strict';
+
+/**
+ * Expose `repeat`
+ */
+
+module.exports = repeat;
+
+/**
+ * Repeat the given `string` the specified `number`
+ * of times.
+ *
+ * **Example:**
+ *
+ * ```js
+ * var repeat = require('repeat-string');
+ * repeat('A', 5);
+ * //=> AAAAA
+ * ```
+ *
+ * @param {String} `string` The string to repeat
+ * @param {Number} `number` The number of times to repeat the string
+ * @return {String} Repeated string
+ * @api public
+ */
+
+function repeat(str, num) {
+  if (typeof str !== 'string') {
+    throw new TypeError('repeat-string expects a string.');
+  }
+
+  if (num === 1) return str;
+  if (num === 2) return str + str;
+
+  var max = str.length * num;
+  if (cache !== str || typeof cache === 'undefined') {
+    cache = str;
+    res = '';
+  }
+
+  while (max > res.length && num > 0) {
+    if (num & 1) {
+      res += str;
+    }
+
+    num >>= 1;
+    if (!num) break;
+    str += str;
+  }
+
+  return res.substr(0, max);
+}
+
+/**
+ * Results cache
+ */
+
+var res = '';
+var cache;
+
+},{}],12:[function(require,module,exports){
 /**
  * Module Dependencies
  */
@@ -4353,6 +6388,16 @@ var wrap = require('wrap-fn');
  */
 
 module.exports = Ware;
+
+/**
+ * Throw an error.
+ *
+ * @param {Error} error
+ */
+
+function fail (err) {
+  throw err;
+}
 
 /**
  * Initialize a new `Ware` manager, with optional `fns`.
@@ -4407,7 +6452,7 @@ Ware.prototype.run = function () {
 
   // next step
   function next (err) {
-    if (err) return done(err);
+    if (err) return (done || fail)(err);
     var fn = fns[i++];
     var arr = slice.call(args);
 
@@ -4423,7 +6468,7 @@ Ware.prototype.run = function () {
   return this;
 };
 
-},{"wrap-fn":11}],11:[function(require,module,exports){
+},{"wrap-fn":13}],13:[function(require,module,exports){
 /**
  * Module Dependencies
  */
@@ -4550,7 +6595,7 @@ function once(fn) {
   };
 }
 
-},{"co":12}],12:[function(require,module,exports){
+},{"co":14}],14:[function(require,module,exports){
 
 /**
  * slice() reference.
@@ -4846,7 +6891,7 @@ function error(err) {
   });
 }
 
-},{}],13:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -4873,7 +6918,7 @@ var AutoFocusMixin = {
 
 module.exports = AutoFocusMixin;
 
-},{"./focusNode":123}],14:[function(require,module,exports){
+},{"./focusNode":125}],16:[function(require,module,exports){
 /**
  * Copyright 2013 Facebook, Inc.
  * All rights reserved.
@@ -5095,7 +7140,7 @@ var BeforeInputEventPlugin = {
 
 module.exports = BeforeInputEventPlugin;
 
-},{"./EventConstants":27,"./EventPropagators":32,"./ExecutionEnvironment":33,"./SyntheticInputEvent":101,"./keyOf":145}],15:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPropagators":34,"./ExecutionEnvironment":35,"./SyntheticInputEvent":103,"./keyOf":147}],17:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -5214,7 +7259,7 @@ var CSSProperty = {
 
 module.exports = CSSProperty;
 
-},{}],16:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -5349,7 +7394,7 @@ var CSSPropertyOperations = {
 module.exports = CSSPropertyOperations;
 
 }).call(this,require('_process'))
-},{"./CSSProperty":15,"./ExecutionEnvironment":33,"./camelizeStyleName":112,"./dangerousStyleValue":117,"./hyphenateStyleName":136,"./memoizeStringOnly":147,"./warning":157,"_process":1}],17:[function(require,module,exports){
+},{"./CSSProperty":17,"./ExecutionEnvironment":35,"./camelizeStyleName":114,"./dangerousStyleValue":119,"./hyphenateStyleName":138,"./memoizeStringOnly":149,"./warning":159,"_process":1}],19:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -5449,7 +7494,7 @@ PooledClass.addPoolingTo(CallbackQueue);
 module.exports = CallbackQueue;
 
 }).call(this,require('_process'))
-},{"./Object.assign":38,"./PooledClass":39,"./invariant":138,"_process":1}],18:[function(require,module,exports){
+},{"./Object.assign":40,"./PooledClass":41,"./invariant":140,"_process":1}],20:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -5831,7 +7876,7 @@ var ChangeEventPlugin = {
 
 module.exports = ChangeEventPlugin;
 
-},{"./EventConstants":27,"./EventPluginHub":29,"./EventPropagators":32,"./ExecutionEnvironment":33,"./ReactUpdates":91,"./SyntheticEvent":99,"./isEventSupported":139,"./isTextInputElement":141,"./keyOf":145}],19:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPluginHub":31,"./EventPropagators":34,"./ExecutionEnvironment":35,"./ReactUpdates":93,"./SyntheticEvent":101,"./isEventSupported":141,"./isTextInputElement":143,"./keyOf":147}],21:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -5856,7 +7901,7 @@ var ClientReactRootIndex = {
 
 module.exports = ClientReactRootIndex;
 
-},{}],20:[function(require,module,exports){
+},{}],22:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -6115,7 +8160,7 @@ var CompositionEventPlugin = {
 
 module.exports = CompositionEventPlugin;
 
-},{"./EventConstants":27,"./EventPropagators":32,"./ExecutionEnvironment":33,"./ReactInputSelection":71,"./SyntheticCompositionEvent":97,"./getTextContentAccessor":133,"./keyOf":145}],21:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPropagators":34,"./ExecutionEnvironment":35,"./ReactInputSelection":73,"./SyntheticCompositionEvent":99,"./getTextContentAccessor":135,"./keyOf":147}],23:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -6290,7 +8335,7 @@ var DOMChildrenOperations = {
 module.exports = DOMChildrenOperations;
 
 }).call(this,require('_process'))
-},{"./Danger":24,"./ReactMultiChildUpdateTypes":77,"./getTextContentAccessor":133,"./invariant":138,"_process":1}],22:[function(require,module,exports){
+},{"./Danger":26,"./ReactMultiChildUpdateTypes":79,"./getTextContentAccessor":135,"./invariant":140,"_process":1}],24:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -6589,7 +8634,7 @@ var DOMProperty = {
 module.exports = DOMProperty;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],23:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],25:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -6786,7 +8831,7 @@ var DOMPropertyOperations = {
 module.exports = DOMPropertyOperations;
 
 }).call(this,require('_process'))
-},{"./DOMProperty":22,"./escapeTextForBrowser":121,"./memoizeStringOnly":147,"./warning":157,"_process":1}],24:[function(require,module,exports){
+},{"./DOMProperty":24,"./escapeTextForBrowser":123,"./memoizeStringOnly":149,"./warning":159,"_process":1}],26:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -6972,7 +9017,7 @@ var Danger = {
 module.exports = Danger;
 
 }).call(this,require('_process'))
-},{"./ExecutionEnvironment":33,"./createNodesFromMarkup":116,"./emptyFunction":119,"./getMarkupWrap":130,"./invariant":138,"_process":1}],25:[function(require,module,exports){
+},{"./ExecutionEnvironment":35,"./createNodesFromMarkup":118,"./emptyFunction":121,"./getMarkupWrap":132,"./invariant":140,"_process":1}],27:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -7012,7 +9057,7 @@ var DefaultEventPluginOrder = [
 
 module.exports = DefaultEventPluginOrder;
 
-},{"./keyOf":145}],26:[function(require,module,exports){
+},{"./keyOf":147}],28:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -7152,7 +9197,7 @@ var EnterLeaveEventPlugin = {
 
 module.exports = EnterLeaveEventPlugin;
 
-},{"./EventConstants":27,"./EventPropagators":32,"./ReactMount":75,"./SyntheticMouseEvent":103,"./keyOf":145}],27:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPropagators":34,"./ReactMount":77,"./SyntheticMouseEvent":105,"./keyOf":147}],29:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -7224,7 +9269,7 @@ var EventConstants = {
 
 module.exports = EventConstants;
 
-},{"./keyMirror":144}],28:[function(require,module,exports){
+},{"./keyMirror":146}],30:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014 Facebook, Inc.
@@ -7314,7 +9359,7 @@ var EventListener = {
 module.exports = EventListener;
 
 }).call(this,require('_process'))
-},{"./emptyFunction":119,"_process":1}],29:[function(require,module,exports){
+},{"./emptyFunction":121,"_process":1}],31:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -7590,7 +9635,7 @@ var EventPluginHub = {
 module.exports = EventPluginHub;
 
 }).call(this,require('_process'))
-},{"./EventPluginRegistry":30,"./EventPluginUtils":31,"./accumulateInto":109,"./forEachAccumulated":124,"./invariant":138,"_process":1}],30:[function(require,module,exports){
+},{"./EventPluginRegistry":32,"./EventPluginUtils":33,"./accumulateInto":111,"./forEachAccumulated":126,"./invariant":140,"_process":1}],32:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -7870,7 +9915,7 @@ var EventPluginRegistry = {
 module.exports = EventPluginRegistry;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],31:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],33:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -8091,7 +10136,7 @@ var EventPluginUtils = {
 module.exports = EventPluginUtils;
 
 }).call(this,require('_process'))
-},{"./EventConstants":27,"./invariant":138,"_process":1}],32:[function(require,module,exports){
+},{"./EventConstants":29,"./invariant":140,"_process":1}],34:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -8233,7 +10278,7 @@ var EventPropagators = {
 module.exports = EventPropagators;
 
 }).call(this,require('_process'))
-},{"./EventConstants":27,"./EventPluginHub":29,"./accumulateInto":109,"./forEachAccumulated":124,"_process":1}],33:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPluginHub":31,"./accumulateInto":111,"./forEachAccumulated":126,"_process":1}],35:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -8278,7 +10323,7 @@ var ExecutionEnvironment = {
 
 module.exports = ExecutionEnvironment;
 
-},{}],34:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -8470,7 +10515,7 @@ var HTMLDOMPropertyConfig = {
 
 module.exports = HTMLDOMPropertyConfig;
 
-},{"./DOMProperty":22,"./ExecutionEnvironment":33}],35:[function(require,module,exports){
+},{"./DOMProperty":24,"./ExecutionEnvironment":35}],37:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -8626,7 +10671,7 @@ var LinkedValueUtils = {
 module.exports = LinkedValueUtils;
 
 }).call(this,require('_process'))
-},{"./ReactPropTypes":84,"./invariant":138,"_process":1}],36:[function(require,module,exports){
+},{"./ReactPropTypes":86,"./invariant":140,"_process":1}],38:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -8676,7 +10721,7 @@ var LocalEventTrapMixin = {
 module.exports = LocalEventTrapMixin;
 
 }).call(this,require('_process'))
-},{"./ReactBrowserEventEmitter":42,"./accumulateInto":109,"./forEachAccumulated":124,"./invariant":138,"_process":1}],37:[function(require,module,exports){
+},{"./ReactBrowserEventEmitter":44,"./accumulateInto":111,"./forEachAccumulated":126,"./invariant":140,"_process":1}],39:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -8734,7 +10779,7 @@ var MobileSafariClickEventPlugin = {
 
 module.exports = MobileSafariClickEventPlugin;
 
-},{"./EventConstants":27,"./emptyFunction":119}],38:[function(require,module,exports){
+},{"./EventConstants":29,"./emptyFunction":121}],40:[function(require,module,exports){
 /**
  * Copyright 2014, Facebook, Inc.
  * All rights reserved.
@@ -8781,7 +10826,7 @@ function assign(target, sources) {
 
 module.exports = assign;
 
-},{}],39:[function(require,module,exports){
+},{}],41:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -8897,7 +10942,7 @@ var PooledClass = {
 module.exports = PooledClass;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],40:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],42:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -9085,7 +11130,7 @@ React.version = '0.12.2';
 module.exports = React;
 
 }).call(this,require('_process'))
-},{"./DOMPropertyOperations":23,"./EventPluginUtils":31,"./ExecutionEnvironment":33,"./Object.assign":38,"./ReactChildren":43,"./ReactComponent":44,"./ReactCompositeComponent":46,"./ReactContext":47,"./ReactCurrentOwner":48,"./ReactDOM":49,"./ReactDOMComponent":51,"./ReactDefaultInjection":61,"./ReactElement":64,"./ReactElementValidator":65,"./ReactInstanceHandles":72,"./ReactLegacyElement":73,"./ReactMount":75,"./ReactMultiChild":76,"./ReactPerf":80,"./ReactPropTypes":84,"./ReactServerRendering":88,"./ReactTextComponent":90,"./deprecated":118,"./onlyChild":149,"_process":1}],41:[function(require,module,exports){
+},{"./DOMPropertyOperations":25,"./EventPluginUtils":33,"./ExecutionEnvironment":35,"./Object.assign":40,"./ReactChildren":45,"./ReactComponent":46,"./ReactCompositeComponent":48,"./ReactContext":49,"./ReactCurrentOwner":50,"./ReactDOM":51,"./ReactDOMComponent":53,"./ReactDefaultInjection":63,"./ReactElement":66,"./ReactElementValidator":67,"./ReactInstanceHandles":74,"./ReactLegacyElement":75,"./ReactMount":77,"./ReactMultiChild":78,"./ReactPerf":82,"./ReactPropTypes":86,"./ReactServerRendering":90,"./ReactTextComponent":92,"./deprecated":120,"./onlyChild":151,"_process":1}],43:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -9128,7 +11173,7 @@ var ReactBrowserComponentMixin = {
 module.exports = ReactBrowserComponentMixin;
 
 }).call(this,require('_process'))
-},{"./ReactEmptyComponent":66,"./ReactMount":75,"./invariant":138,"_process":1}],42:[function(require,module,exports){
+},{"./ReactEmptyComponent":68,"./ReactMount":77,"./invariant":140,"_process":1}],44:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -9483,7 +11528,7 @@ var ReactBrowserEventEmitter = assign({}, ReactEventEmitterMixin, {
 
 module.exports = ReactBrowserEventEmitter;
 
-},{"./EventConstants":27,"./EventPluginHub":29,"./EventPluginRegistry":30,"./Object.assign":38,"./ReactEventEmitterMixin":68,"./ViewportMetrics":108,"./isEventSupported":139}],43:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPluginHub":31,"./EventPluginRegistry":32,"./Object.assign":40,"./ReactEventEmitterMixin":70,"./ViewportMetrics":110,"./isEventSupported":141}],45:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -9633,7 +11678,7 @@ var ReactChildren = {
 module.exports = ReactChildren;
 
 }).call(this,require('_process'))
-},{"./PooledClass":39,"./traverseAllChildren":156,"./warning":157,"_process":1}],44:[function(require,module,exports){
+},{"./PooledClass":41,"./traverseAllChildren":158,"./warning":159,"_process":1}],46:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -10076,7 +12121,7 @@ var ReactComponent = {
 module.exports = ReactComponent;
 
 }).call(this,require('_process'))
-},{"./Object.assign":38,"./ReactElement":64,"./ReactOwner":79,"./ReactUpdates":91,"./invariant":138,"./keyMirror":144,"_process":1}],45:[function(require,module,exports){
+},{"./Object.assign":40,"./ReactElement":66,"./ReactOwner":81,"./ReactUpdates":93,"./invariant":140,"./keyMirror":146,"_process":1}],47:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -10198,7 +12243,7 @@ var ReactComponentBrowserEnvironment = {
 module.exports = ReactComponentBrowserEnvironment;
 
 }).call(this,require('_process'))
-},{"./ReactDOMIDOperations":53,"./ReactMarkupChecksum":74,"./ReactMount":75,"./ReactPerf":80,"./ReactReconcileTransaction":86,"./getReactRootElementInContainer":132,"./invariant":138,"./setInnerHTML":152,"_process":1}],46:[function(require,module,exports){
+},{"./ReactDOMIDOperations":55,"./ReactMarkupChecksum":76,"./ReactMount":77,"./ReactPerf":82,"./ReactReconcileTransaction":88,"./getReactRootElementInContainer":134,"./invariant":140,"./setInnerHTML":154,"_process":1}],48:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -11638,7 +13683,7 @@ var ReactCompositeComponent = {
 module.exports = ReactCompositeComponent;
 
 }).call(this,require('_process'))
-},{"./Object.assign":38,"./ReactComponent":44,"./ReactContext":47,"./ReactCurrentOwner":48,"./ReactElement":64,"./ReactElementValidator":65,"./ReactEmptyComponent":66,"./ReactErrorUtils":67,"./ReactLegacyElement":73,"./ReactOwner":79,"./ReactPerf":80,"./ReactPropTransferer":81,"./ReactPropTypeLocationNames":82,"./ReactPropTypeLocations":83,"./ReactUpdates":91,"./instantiateReactComponent":137,"./invariant":138,"./keyMirror":144,"./keyOf":145,"./mapObject":146,"./monitorCodeUse":148,"./shouldUpdateReactComponent":154,"./warning":157,"_process":1}],47:[function(require,module,exports){
+},{"./Object.assign":40,"./ReactComponent":46,"./ReactContext":49,"./ReactCurrentOwner":50,"./ReactElement":66,"./ReactElementValidator":67,"./ReactEmptyComponent":68,"./ReactErrorUtils":69,"./ReactLegacyElement":75,"./ReactOwner":81,"./ReactPerf":82,"./ReactPropTransferer":83,"./ReactPropTypeLocationNames":84,"./ReactPropTypeLocations":85,"./ReactUpdates":93,"./instantiateReactComponent":139,"./invariant":140,"./keyMirror":146,"./keyOf":147,"./mapObject":148,"./monitorCodeUse":150,"./shouldUpdateReactComponent":156,"./warning":159,"_process":1}],49:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -11700,7 +13745,7 @@ var ReactContext = {
 
 module.exports = ReactContext;
 
-},{"./Object.assign":38}],48:[function(require,module,exports){
+},{"./Object.assign":40}],50:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -11734,7 +13779,7 @@ var ReactCurrentOwner = {
 
 module.exports = ReactCurrentOwner;
 
-},{}],49:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -11917,7 +13962,7 @@ var ReactDOM = mapObject({
 module.exports = ReactDOM;
 
 }).call(this,require('_process'))
-},{"./ReactElement":64,"./ReactElementValidator":65,"./ReactLegacyElement":73,"./mapObject":146,"_process":1}],50:[function(require,module,exports){
+},{"./ReactElement":66,"./ReactElementValidator":67,"./ReactLegacyElement":75,"./mapObject":148,"_process":1}],52:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -11982,7 +14027,7 @@ var ReactDOMButton = ReactCompositeComponent.createClass({
 
 module.exports = ReactDOMButton;
 
-},{"./AutoFocusMixin":13,"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64,"./keyMirror":144}],51:[function(require,module,exports){
+},{"./AutoFocusMixin":15,"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66,"./keyMirror":146}],53:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -12469,7 +14514,7 @@ assign(
 module.exports = ReactDOMComponent;
 
 }).call(this,require('_process'))
-},{"./CSSPropertyOperations":16,"./DOMProperty":22,"./DOMPropertyOperations":23,"./Object.assign":38,"./ReactBrowserComponentMixin":41,"./ReactBrowserEventEmitter":42,"./ReactComponent":44,"./ReactMount":75,"./ReactMultiChild":76,"./ReactPerf":80,"./escapeTextForBrowser":121,"./invariant":138,"./isEventSupported":139,"./keyOf":145,"./monitorCodeUse":148,"_process":1}],52:[function(require,module,exports){
+},{"./CSSPropertyOperations":18,"./DOMProperty":24,"./DOMPropertyOperations":25,"./Object.assign":40,"./ReactBrowserComponentMixin":43,"./ReactBrowserEventEmitter":44,"./ReactComponent":46,"./ReactMount":77,"./ReactMultiChild":78,"./ReactPerf":82,"./escapeTextForBrowser":123,"./invariant":140,"./isEventSupported":141,"./keyOf":147,"./monitorCodeUse":150,"_process":1}],54:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -12519,7 +14564,7 @@ var ReactDOMForm = ReactCompositeComponent.createClass({
 
 module.exports = ReactDOMForm;
 
-},{"./EventConstants":27,"./LocalEventTrapMixin":36,"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64}],53:[function(require,module,exports){
+},{"./EventConstants":29,"./LocalEventTrapMixin":38,"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66}],55:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -12705,7 +14750,7 @@ var ReactDOMIDOperations = {
 module.exports = ReactDOMIDOperations;
 
 }).call(this,require('_process'))
-},{"./CSSPropertyOperations":16,"./DOMChildrenOperations":21,"./DOMPropertyOperations":23,"./ReactMount":75,"./ReactPerf":80,"./invariant":138,"./setInnerHTML":152,"_process":1}],54:[function(require,module,exports){
+},{"./CSSPropertyOperations":18,"./DOMChildrenOperations":23,"./DOMPropertyOperations":25,"./ReactMount":77,"./ReactPerf":82,"./invariant":140,"./setInnerHTML":154,"_process":1}],56:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -12753,7 +14798,7 @@ var ReactDOMImg = ReactCompositeComponent.createClass({
 
 module.exports = ReactDOMImg;
 
-},{"./EventConstants":27,"./LocalEventTrapMixin":36,"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64}],55:[function(require,module,exports){
+},{"./EventConstants":29,"./LocalEventTrapMixin":38,"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66}],57:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -12931,7 +14976,7 @@ var ReactDOMInput = ReactCompositeComponent.createClass({
 module.exports = ReactDOMInput;
 
 }).call(this,require('_process'))
-},{"./AutoFocusMixin":13,"./DOMPropertyOperations":23,"./LinkedValueUtils":35,"./Object.assign":38,"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64,"./ReactMount":75,"./ReactUpdates":91,"./invariant":138,"_process":1}],56:[function(require,module,exports){
+},{"./AutoFocusMixin":15,"./DOMPropertyOperations":25,"./LinkedValueUtils":37,"./Object.assign":40,"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66,"./ReactMount":77,"./ReactUpdates":93,"./invariant":140,"_process":1}],58:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -12984,7 +15029,7 @@ var ReactDOMOption = ReactCompositeComponent.createClass({
 module.exports = ReactDOMOption;
 
 }).call(this,require('_process'))
-},{"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64,"./warning":157,"_process":1}],57:[function(require,module,exports){
+},{"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66,"./warning":159,"_process":1}],59:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -13168,7 +15213,7 @@ var ReactDOMSelect = ReactCompositeComponent.createClass({
 
 module.exports = ReactDOMSelect;
 
-},{"./AutoFocusMixin":13,"./LinkedValueUtils":35,"./Object.assign":38,"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64,"./ReactUpdates":91}],58:[function(require,module,exports){
+},{"./AutoFocusMixin":15,"./LinkedValueUtils":37,"./Object.assign":40,"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66,"./ReactUpdates":93}],60:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -13377,7 +15422,7 @@ var ReactDOMSelection = {
 
 module.exports = ReactDOMSelection;
 
-},{"./ExecutionEnvironment":33,"./getNodeForCharacterOffset":131,"./getTextContentAccessor":133}],59:[function(require,module,exports){
+},{"./ExecutionEnvironment":35,"./getNodeForCharacterOffset":133,"./getTextContentAccessor":135}],61:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -13518,7 +15563,7 @@ var ReactDOMTextarea = ReactCompositeComponent.createClass({
 module.exports = ReactDOMTextarea;
 
 }).call(this,require('_process'))
-},{"./AutoFocusMixin":13,"./DOMPropertyOperations":23,"./LinkedValueUtils":35,"./Object.assign":38,"./ReactBrowserComponentMixin":41,"./ReactCompositeComponent":46,"./ReactDOM":49,"./ReactElement":64,"./ReactUpdates":91,"./invariant":138,"./warning":157,"_process":1}],60:[function(require,module,exports){
+},{"./AutoFocusMixin":15,"./DOMPropertyOperations":25,"./LinkedValueUtils":37,"./Object.assign":40,"./ReactBrowserComponentMixin":43,"./ReactCompositeComponent":48,"./ReactDOM":51,"./ReactElement":66,"./ReactUpdates":93,"./invariant":140,"./warning":159,"_process":1}],62:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -13591,7 +15636,7 @@ var ReactDefaultBatchingStrategy = {
 
 module.exports = ReactDefaultBatchingStrategy;
 
-},{"./Object.assign":38,"./ReactUpdates":91,"./Transaction":107,"./emptyFunction":119}],61:[function(require,module,exports){
+},{"./Object.assign":40,"./ReactUpdates":93,"./Transaction":109,"./emptyFunction":121}],63:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -13720,7 +15765,7 @@ module.exports = {
 };
 
 }).call(this,require('_process'))
-},{"./BeforeInputEventPlugin":14,"./ChangeEventPlugin":18,"./ClientReactRootIndex":19,"./CompositionEventPlugin":20,"./DefaultEventPluginOrder":25,"./EnterLeaveEventPlugin":26,"./ExecutionEnvironment":33,"./HTMLDOMPropertyConfig":34,"./MobileSafariClickEventPlugin":37,"./ReactBrowserComponentMixin":41,"./ReactComponentBrowserEnvironment":45,"./ReactDOMButton":50,"./ReactDOMComponent":51,"./ReactDOMForm":52,"./ReactDOMImg":54,"./ReactDOMInput":55,"./ReactDOMOption":56,"./ReactDOMSelect":57,"./ReactDOMTextarea":59,"./ReactDefaultBatchingStrategy":60,"./ReactDefaultPerf":62,"./ReactEventListener":69,"./ReactInjection":70,"./ReactInstanceHandles":72,"./ReactMount":75,"./SVGDOMPropertyConfig":92,"./SelectEventPlugin":93,"./ServerReactRootIndex":94,"./SimpleEventPlugin":95,"./createFullPageComponent":115,"_process":1}],62:[function(require,module,exports){
+},{"./BeforeInputEventPlugin":16,"./ChangeEventPlugin":20,"./ClientReactRootIndex":21,"./CompositionEventPlugin":22,"./DefaultEventPluginOrder":27,"./EnterLeaveEventPlugin":28,"./ExecutionEnvironment":35,"./HTMLDOMPropertyConfig":36,"./MobileSafariClickEventPlugin":39,"./ReactBrowserComponentMixin":43,"./ReactComponentBrowserEnvironment":47,"./ReactDOMButton":52,"./ReactDOMComponent":53,"./ReactDOMForm":54,"./ReactDOMImg":56,"./ReactDOMInput":57,"./ReactDOMOption":58,"./ReactDOMSelect":59,"./ReactDOMTextarea":61,"./ReactDefaultBatchingStrategy":62,"./ReactDefaultPerf":64,"./ReactEventListener":71,"./ReactInjection":72,"./ReactInstanceHandles":74,"./ReactMount":77,"./SVGDOMPropertyConfig":94,"./SelectEventPlugin":95,"./ServerReactRootIndex":96,"./SimpleEventPlugin":97,"./createFullPageComponent":117,"_process":1}],64:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -13980,7 +16025,7 @@ var ReactDefaultPerf = {
 
 module.exports = ReactDefaultPerf;
 
-},{"./DOMProperty":22,"./ReactDefaultPerfAnalysis":63,"./ReactMount":75,"./ReactPerf":80,"./performanceNow":151}],63:[function(require,module,exports){
+},{"./DOMProperty":24,"./ReactDefaultPerfAnalysis":65,"./ReactMount":77,"./ReactPerf":82,"./performanceNow":153}],65:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -14186,7 +16231,7 @@ var ReactDefaultPerfAnalysis = {
 
 module.exports = ReactDefaultPerfAnalysis;
 
-},{"./Object.assign":38}],64:[function(require,module,exports){
+},{"./Object.assign":40}],66:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -14432,7 +16477,7 @@ ReactElement.isValidElement = function(object) {
 module.exports = ReactElement;
 
 }).call(this,require('_process'))
-},{"./ReactContext":47,"./ReactCurrentOwner":48,"./warning":157,"_process":1}],65:[function(require,module,exports){
+},{"./ReactContext":49,"./ReactCurrentOwner":50,"./warning":159,"_process":1}],67:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -14714,7 +16759,7 @@ var ReactElementValidator = {
 module.exports = ReactElementValidator;
 
 }).call(this,require('_process'))
-},{"./ReactCurrentOwner":48,"./ReactElement":64,"./ReactPropTypeLocations":83,"./monitorCodeUse":148,"./warning":157,"_process":1}],66:[function(require,module,exports){
+},{"./ReactCurrentOwner":50,"./ReactElement":66,"./ReactPropTypeLocations":85,"./monitorCodeUse":150,"./warning":159,"_process":1}],68:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -14791,7 +16836,7 @@ var ReactEmptyComponent = {
 module.exports = ReactEmptyComponent;
 
 }).call(this,require('_process'))
-},{"./ReactElement":64,"./invariant":138,"_process":1}],67:[function(require,module,exports){
+},{"./ReactElement":66,"./invariant":140,"_process":1}],69:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -14823,7 +16868,7 @@ var ReactErrorUtils = {
 
 module.exports = ReactErrorUtils;
 
-},{}],68:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -14873,7 +16918,7 @@ var ReactEventEmitterMixin = {
 
 module.exports = ReactEventEmitterMixin;
 
-},{"./EventPluginHub":29}],69:[function(require,module,exports){
+},{"./EventPluginHub":31}],71:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -15057,7 +17102,7 @@ var ReactEventListener = {
 
 module.exports = ReactEventListener;
 
-},{"./EventListener":28,"./ExecutionEnvironment":33,"./Object.assign":38,"./PooledClass":39,"./ReactInstanceHandles":72,"./ReactMount":75,"./ReactUpdates":91,"./getEventTarget":129,"./getUnboundedScrollPosition":134}],70:[function(require,module,exports){
+},{"./EventListener":30,"./ExecutionEnvironment":35,"./Object.assign":40,"./PooledClass":41,"./ReactInstanceHandles":74,"./ReactMount":77,"./ReactUpdates":93,"./getEventTarget":131,"./getUnboundedScrollPosition":136}],72:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -15097,7 +17142,7 @@ var ReactInjection = {
 
 module.exports = ReactInjection;
 
-},{"./DOMProperty":22,"./EventPluginHub":29,"./ReactBrowserEventEmitter":42,"./ReactComponent":44,"./ReactCompositeComponent":46,"./ReactEmptyComponent":66,"./ReactNativeComponent":78,"./ReactPerf":80,"./ReactRootIndex":87,"./ReactUpdates":91}],71:[function(require,module,exports){
+},{"./DOMProperty":24,"./EventPluginHub":31,"./ReactBrowserEventEmitter":44,"./ReactComponent":46,"./ReactCompositeComponent":48,"./ReactEmptyComponent":68,"./ReactNativeComponent":80,"./ReactPerf":82,"./ReactRootIndex":89,"./ReactUpdates":93}],73:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -15233,7 +17278,7 @@ var ReactInputSelection = {
 
 module.exports = ReactInputSelection;
 
-},{"./ReactDOMSelection":58,"./containsNode":113,"./focusNode":123,"./getActiveElement":125}],72:[function(require,module,exports){
+},{"./ReactDOMSelection":60,"./containsNode":115,"./focusNode":125,"./getActiveElement":127}],74:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -15568,7 +17613,7 @@ var ReactInstanceHandles = {
 module.exports = ReactInstanceHandles;
 
 }).call(this,require('_process'))
-},{"./ReactRootIndex":87,"./invariant":138,"_process":1}],73:[function(require,module,exports){
+},{"./ReactRootIndex":89,"./invariant":140,"_process":1}],75:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -15815,7 +17860,7 @@ ReactLegacyElementFactory._isLegacyCallWarningEnabled = true;
 module.exports = ReactLegacyElementFactory;
 
 }).call(this,require('_process'))
-},{"./ReactCurrentOwner":48,"./invariant":138,"./monitorCodeUse":148,"./warning":157,"_process":1}],74:[function(require,module,exports){
+},{"./ReactCurrentOwner":50,"./invariant":140,"./monitorCodeUse":150,"./warning":159,"_process":1}],76:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -15863,7 +17908,7 @@ var ReactMarkupChecksum = {
 
 module.exports = ReactMarkupChecksum;
 
-},{"./adler32":110}],75:[function(require,module,exports){
+},{"./adler32":112}],77:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -16561,7 +18606,7 @@ ReactMount.renderComponent = deprecated(
 module.exports = ReactMount;
 
 }).call(this,require('_process'))
-},{"./DOMProperty":22,"./ReactBrowserEventEmitter":42,"./ReactCurrentOwner":48,"./ReactElement":64,"./ReactInstanceHandles":72,"./ReactLegacyElement":73,"./ReactPerf":80,"./containsNode":113,"./deprecated":118,"./getReactRootElementInContainer":132,"./instantiateReactComponent":137,"./invariant":138,"./shouldUpdateReactComponent":154,"./warning":157,"_process":1}],76:[function(require,module,exports){
+},{"./DOMProperty":24,"./ReactBrowserEventEmitter":44,"./ReactCurrentOwner":50,"./ReactElement":66,"./ReactInstanceHandles":74,"./ReactLegacyElement":75,"./ReactPerf":82,"./containsNode":115,"./deprecated":120,"./getReactRootElementInContainer":134,"./instantiateReactComponent":139,"./invariant":140,"./shouldUpdateReactComponent":156,"./warning":159,"_process":1}],78:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -16989,7 +19034,7 @@ var ReactMultiChild = {
 
 module.exports = ReactMultiChild;
 
-},{"./ReactComponent":44,"./ReactMultiChildUpdateTypes":77,"./flattenChildren":122,"./instantiateReactComponent":137,"./shouldUpdateReactComponent":154}],77:[function(require,module,exports){
+},{"./ReactComponent":46,"./ReactMultiChildUpdateTypes":79,"./flattenChildren":124,"./instantiateReactComponent":139,"./shouldUpdateReactComponent":156}],79:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -17022,7 +19067,7 @@ var ReactMultiChildUpdateTypes = keyMirror({
 
 module.exports = ReactMultiChildUpdateTypes;
 
-},{"./keyMirror":144}],78:[function(require,module,exports){
+},{"./keyMirror":146}],80:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -17095,7 +19140,7 @@ var ReactNativeComponent = {
 module.exports = ReactNativeComponent;
 
 }).call(this,require('_process'))
-},{"./Object.assign":38,"./invariant":138,"_process":1}],79:[function(require,module,exports){
+},{"./Object.assign":40,"./invariant":140,"_process":1}],81:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -17251,7 +19296,7 @@ var ReactOwner = {
 module.exports = ReactOwner;
 
 }).call(this,require('_process'))
-},{"./emptyObject":120,"./invariant":138,"_process":1}],80:[function(require,module,exports){
+},{"./emptyObject":122,"./invariant":140,"_process":1}],82:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -17335,7 +19380,7 @@ function _noMeasure(objName, fnName, func) {
 module.exports = ReactPerf;
 
 }).call(this,require('_process'))
-},{"_process":1}],81:[function(require,module,exports){
+},{"_process":1}],83:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -17502,7 +19547,7 @@ var ReactPropTransferer = {
 module.exports = ReactPropTransferer;
 
 }).call(this,require('_process'))
-},{"./Object.assign":38,"./emptyFunction":119,"./invariant":138,"./joinClasses":143,"./warning":157,"_process":1}],82:[function(require,module,exports){
+},{"./Object.assign":40,"./emptyFunction":121,"./invariant":140,"./joinClasses":145,"./warning":159,"_process":1}],84:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -17530,7 +19575,7 @@ if ("production" !== process.env.NODE_ENV) {
 module.exports = ReactPropTypeLocationNames;
 
 }).call(this,require('_process'))
-},{"_process":1}],83:[function(require,module,exports){
+},{"_process":1}],85:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -17554,7 +19599,7 @@ var ReactPropTypeLocations = keyMirror({
 
 module.exports = ReactPropTypeLocations;
 
-},{"./keyMirror":144}],84:[function(require,module,exports){
+},{"./keyMirror":146}],86:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -17908,7 +19953,7 @@ function getPreciseType(propValue) {
 
 module.exports = ReactPropTypes;
 
-},{"./ReactElement":64,"./ReactPropTypeLocationNames":82,"./deprecated":118,"./emptyFunction":119}],85:[function(require,module,exports){
+},{"./ReactElement":66,"./ReactPropTypeLocationNames":84,"./deprecated":120,"./emptyFunction":121}],87:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -17964,7 +20009,7 @@ PooledClass.addPoolingTo(ReactPutListenerQueue);
 
 module.exports = ReactPutListenerQueue;
 
-},{"./Object.assign":38,"./PooledClass":39,"./ReactBrowserEventEmitter":42}],86:[function(require,module,exports){
+},{"./Object.assign":40,"./PooledClass":41,"./ReactBrowserEventEmitter":44}],88:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -18140,7 +20185,7 @@ PooledClass.addPoolingTo(ReactReconcileTransaction);
 
 module.exports = ReactReconcileTransaction;
 
-},{"./CallbackQueue":17,"./Object.assign":38,"./PooledClass":39,"./ReactBrowserEventEmitter":42,"./ReactInputSelection":71,"./ReactPutListenerQueue":85,"./Transaction":107}],87:[function(require,module,exports){
+},{"./CallbackQueue":19,"./Object.assign":40,"./PooledClass":41,"./ReactBrowserEventEmitter":44,"./ReactInputSelection":73,"./ReactPutListenerQueue":87,"./Transaction":109}],89:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -18171,7 +20216,7 @@ var ReactRootIndex = {
 
 module.exports = ReactRootIndex;
 
-},{}],88:[function(require,module,exports){
+},{}],90:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -18251,7 +20296,7 @@ module.exports = {
 };
 
 }).call(this,require('_process'))
-},{"./ReactElement":64,"./ReactInstanceHandles":72,"./ReactMarkupChecksum":74,"./ReactServerRenderingTransaction":89,"./instantiateReactComponent":137,"./invariant":138,"_process":1}],89:[function(require,module,exports){
+},{"./ReactElement":66,"./ReactInstanceHandles":74,"./ReactMarkupChecksum":76,"./ReactServerRenderingTransaction":91,"./instantiateReactComponent":139,"./invariant":140,"_process":1}],91:[function(require,module,exports){
 /**
  * Copyright 2014, Facebook, Inc.
  * All rights reserved.
@@ -18364,7 +20409,7 @@ PooledClass.addPoolingTo(ReactServerRenderingTransaction);
 
 module.exports = ReactServerRenderingTransaction;
 
-},{"./CallbackQueue":17,"./Object.assign":38,"./PooledClass":39,"./ReactPutListenerQueue":85,"./Transaction":107,"./emptyFunction":119}],90:[function(require,module,exports){
+},{"./CallbackQueue":19,"./Object.assign":40,"./PooledClass":41,"./ReactPutListenerQueue":87,"./Transaction":109,"./emptyFunction":121}],92:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -18470,7 +20515,7 @@ ReactTextComponentFactory.type = ReactTextComponent;
 
 module.exports = ReactTextComponentFactory;
 
-},{"./DOMPropertyOperations":23,"./Object.assign":38,"./ReactComponent":44,"./ReactElement":64,"./escapeTextForBrowser":121}],91:[function(require,module,exports){
+},{"./DOMPropertyOperations":25,"./Object.assign":40,"./ReactComponent":46,"./ReactElement":66,"./escapeTextForBrowser":123}],93:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -18760,7 +20805,7 @@ var ReactUpdates = {
 module.exports = ReactUpdates;
 
 }).call(this,require('_process'))
-},{"./CallbackQueue":17,"./Object.assign":38,"./PooledClass":39,"./ReactCurrentOwner":48,"./ReactPerf":80,"./Transaction":107,"./invariant":138,"./warning":157,"_process":1}],92:[function(require,module,exports){
+},{"./CallbackQueue":19,"./Object.assign":40,"./PooledClass":41,"./ReactCurrentOwner":50,"./ReactPerf":82,"./Transaction":109,"./invariant":140,"./warning":159,"_process":1}],94:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -18852,7 +20897,7 @@ var SVGDOMPropertyConfig = {
 
 module.exports = SVGDOMPropertyConfig;
 
-},{"./DOMProperty":22}],93:[function(require,module,exports){
+},{"./DOMProperty":24}],95:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19047,7 +21092,7 @@ var SelectEventPlugin = {
 
 module.exports = SelectEventPlugin;
 
-},{"./EventConstants":27,"./EventPropagators":32,"./ReactInputSelection":71,"./SyntheticEvent":99,"./getActiveElement":125,"./isTextInputElement":141,"./keyOf":145,"./shallowEqual":153}],94:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPropagators":34,"./ReactInputSelection":73,"./SyntheticEvent":101,"./getActiveElement":127,"./isTextInputElement":143,"./keyOf":147,"./shallowEqual":155}],96:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19078,7 +21123,7 @@ var ServerReactRootIndex = {
 
 module.exports = ServerReactRootIndex;
 
-},{}],95:[function(require,module,exports){
+},{}],97:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -19506,7 +21551,7 @@ var SimpleEventPlugin = {
 module.exports = SimpleEventPlugin;
 
 }).call(this,require('_process'))
-},{"./EventConstants":27,"./EventPluginUtils":31,"./EventPropagators":32,"./SyntheticClipboardEvent":96,"./SyntheticDragEvent":98,"./SyntheticEvent":99,"./SyntheticFocusEvent":100,"./SyntheticKeyboardEvent":102,"./SyntheticMouseEvent":103,"./SyntheticTouchEvent":104,"./SyntheticUIEvent":105,"./SyntheticWheelEvent":106,"./getEventCharCode":126,"./invariant":138,"./keyOf":145,"./warning":157,"_process":1}],96:[function(require,module,exports){
+},{"./EventConstants":29,"./EventPluginUtils":33,"./EventPropagators":34,"./SyntheticClipboardEvent":98,"./SyntheticDragEvent":100,"./SyntheticEvent":101,"./SyntheticFocusEvent":102,"./SyntheticKeyboardEvent":104,"./SyntheticMouseEvent":105,"./SyntheticTouchEvent":106,"./SyntheticUIEvent":107,"./SyntheticWheelEvent":108,"./getEventCharCode":128,"./invariant":140,"./keyOf":147,"./warning":159,"_process":1}],98:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19552,7 +21597,7 @@ SyntheticEvent.augmentClass(SyntheticClipboardEvent, ClipboardEventInterface);
 module.exports = SyntheticClipboardEvent;
 
 
-},{"./SyntheticEvent":99}],97:[function(require,module,exports){
+},{"./SyntheticEvent":101}],99:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19598,7 +21643,7 @@ SyntheticEvent.augmentClass(
 module.exports = SyntheticCompositionEvent;
 
 
-},{"./SyntheticEvent":99}],98:[function(require,module,exports){
+},{"./SyntheticEvent":101}],100:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19637,7 +21682,7 @@ SyntheticMouseEvent.augmentClass(SyntheticDragEvent, DragEventInterface);
 
 module.exports = SyntheticDragEvent;
 
-},{"./SyntheticMouseEvent":103}],99:[function(require,module,exports){
+},{"./SyntheticMouseEvent":105}],101:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19795,7 +21840,7 @@ PooledClass.addPoolingTo(SyntheticEvent, PooledClass.threeArgumentPooler);
 
 module.exports = SyntheticEvent;
 
-},{"./Object.assign":38,"./PooledClass":39,"./emptyFunction":119,"./getEventTarget":129}],100:[function(require,module,exports){
+},{"./Object.assign":40,"./PooledClass":41,"./emptyFunction":121,"./getEventTarget":131}],102:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19834,7 +21879,7 @@ SyntheticUIEvent.augmentClass(SyntheticFocusEvent, FocusEventInterface);
 
 module.exports = SyntheticFocusEvent;
 
-},{"./SyntheticUIEvent":105}],101:[function(require,module,exports){
+},{"./SyntheticUIEvent":107}],103:[function(require,module,exports){
 /**
  * Copyright 2013 Facebook, Inc.
  * All rights reserved.
@@ -19881,7 +21926,7 @@ SyntheticEvent.augmentClass(
 module.exports = SyntheticInputEvent;
 
 
-},{"./SyntheticEvent":99}],102:[function(require,module,exports){
+},{"./SyntheticEvent":101}],104:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -19968,7 +22013,7 @@ SyntheticUIEvent.augmentClass(SyntheticKeyboardEvent, KeyboardEventInterface);
 
 module.exports = SyntheticKeyboardEvent;
 
-},{"./SyntheticUIEvent":105,"./getEventCharCode":126,"./getEventKey":127,"./getEventModifierState":128}],103:[function(require,module,exports){
+},{"./SyntheticUIEvent":107,"./getEventCharCode":128,"./getEventKey":129,"./getEventModifierState":130}],105:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20051,7 +22096,7 @@ SyntheticUIEvent.augmentClass(SyntheticMouseEvent, MouseEventInterface);
 
 module.exports = SyntheticMouseEvent;
 
-},{"./SyntheticUIEvent":105,"./ViewportMetrics":108,"./getEventModifierState":128}],104:[function(require,module,exports){
+},{"./SyntheticUIEvent":107,"./ViewportMetrics":110,"./getEventModifierState":130}],106:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20099,7 +22144,7 @@ SyntheticUIEvent.augmentClass(SyntheticTouchEvent, TouchEventInterface);
 
 module.exports = SyntheticTouchEvent;
 
-},{"./SyntheticUIEvent":105,"./getEventModifierState":128}],105:[function(require,module,exports){
+},{"./SyntheticUIEvent":107,"./getEventModifierState":130}],107:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20161,7 +22206,7 @@ SyntheticEvent.augmentClass(SyntheticUIEvent, UIEventInterface);
 
 module.exports = SyntheticUIEvent;
 
-},{"./SyntheticEvent":99,"./getEventTarget":129}],106:[function(require,module,exports){
+},{"./SyntheticEvent":101,"./getEventTarget":131}],108:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20222,7 +22267,7 @@ SyntheticMouseEvent.augmentClass(SyntheticWheelEvent, WheelEventInterface);
 
 module.exports = SyntheticWheelEvent;
 
-},{"./SyntheticMouseEvent":103}],107:[function(require,module,exports){
+},{"./SyntheticMouseEvent":105}],109:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -20463,7 +22508,7 @@ var Transaction = {
 module.exports = Transaction;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],108:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],110:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20495,7 +22540,7 @@ var ViewportMetrics = {
 
 module.exports = ViewportMetrics;
 
-},{"./getUnboundedScrollPosition":134}],109:[function(require,module,exports){
+},{"./getUnboundedScrollPosition":136}],111:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -20561,7 +22606,7 @@ function accumulateInto(current, next) {
 module.exports = accumulateInto;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],110:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],112:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20595,7 +22640,7 @@ function adler32(data) {
 
 module.exports = adler32;
 
-},{}],111:[function(require,module,exports){
+},{}],113:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20627,7 +22672,7 @@ function camelize(string) {
 
 module.exports = camelize;
 
-},{}],112:[function(require,module,exports){
+},{}],114:[function(require,module,exports){
 /**
  * Copyright 2014, Facebook, Inc.
  * All rights reserved.
@@ -20669,7 +22714,7 @@ function camelizeStyleName(string) {
 
 module.exports = camelizeStyleName;
 
-},{"./camelize":111}],113:[function(require,module,exports){
+},{"./camelize":113}],115:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20713,7 +22758,7 @@ function containsNode(outerNode, innerNode) {
 
 module.exports = containsNode;
 
-},{"./isTextNode":142}],114:[function(require,module,exports){
+},{"./isTextNode":144}],116:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -20799,7 +22844,7 @@ function createArrayFrom(obj) {
 
 module.exports = createArrayFrom;
 
-},{"./toArray":155}],115:[function(require,module,exports){
+},{"./toArray":157}],117:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -20860,7 +22905,7 @@ function createFullPageComponent(tag) {
 module.exports = createFullPageComponent;
 
 }).call(this,require('_process'))
-},{"./ReactCompositeComponent":46,"./ReactElement":64,"./invariant":138,"_process":1}],116:[function(require,module,exports){
+},{"./ReactCompositeComponent":48,"./ReactElement":66,"./invariant":140,"_process":1}],118:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -20950,7 +22995,7 @@ function createNodesFromMarkup(markup, handleScript) {
 module.exports = createNodesFromMarkup;
 
 }).call(this,require('_process'))
-},{"./ExecutionEnvironment":33,"./createArrayFrom":114,"./getMarkupWrap":130,"./invariant":138,"_process":1}],117:[function(require,module,exports){
+},{"./ExecutionEnvironment":35,"./createArrayFrom":116,"./getMarkupWrap":132,"./invariant":140,"_process":1}],119:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21008,7 +23053,7 @@ function dangerousStyleValue(name, value) {
 
 module.exports = dangerousStyleValue;
 
-},{"./CSSProperty":15}],118:[function(require,module,exports){
+},{"./CSSProperty":17}],120:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -21059,7 +23104,7 @@ function deprecated(namespace, oldName, newName, ctx, fn) {
 module.exports = deprecated;
 
 }).call(this,require('_process'))
-},{"./Object.assign":38,"./warning":157,"_process":1}],119:[function(require,module,exports){
+},{"./Object.assign":40,"./warning":159,"_process":1}],121:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21093,7 +23138,7 @@ emptyFunction.thatReturnsArgument = function(arg) { return arg; };
 
 module.exports = emptyFunction;
 
-},{}],120:[function(require,module,exports){
+},{}],122:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -21117,7 +23162,7 @@ if ("production" !== process.env.NODE_ENV) {
 module.exports = emptyObject;
 
 }).call(this,require('_process'))
-},{"_process":1}],121:[function(require,module,exports){
+},{"_process":1}],123:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21158,7 +23203,7 @@ function escapeTextForBrowser(text) {
 
 module.exports = escapeTextForBrowser;
 
-},{}],122:[function(require,module,exports){
+},{}],124:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -21227,7 +23272,7 @@ function flattenChildren(children) {
 module.exports = flattenChildren;
 
 }).call(this,require('_process'))
-},{"./ReactTextComponent":90,"./traverseAllChildren":156,"./warning":157,"_process":1}],123:[function(require,module,exports){
+},{"./ReactTextComponent":92,"./traverseAllChildren":158,"./warning":159,"_process":1}],125:[function(require,module,exports){
 /**
  * Copyright 2014, Facebook, Inc.
  * All rights reserved.
@@ -21256,7 +23301,7 @@ function focusNode(node) {
 
 module.exports = focusNode;
 
-},{}],124:[function(require,module,exports){
+},{}],126:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21287,7 +23332,7 @@ var forEachAccumulated = function(arr, cb, scope) {
 
 module.exports = forEachAccumulated;
 
-},{}],125:[function(require,module,exports){
+},{}],127:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21316,7 +23361,7 @@ function getActiveElement() /*?DOMElement*/ {
 
 module.exports = getActiveElement;
 
-},{}],126:[function(require,module,exports){
+},{}],128:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21368,7 +23413,7 @@ function getEventCharCode(nativeEvent) {
 
 module.exports = getEventCharCode;
 
-},{}],127:[function(require,module,exports){
+},{}],129:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21473,7 +23518,7 @@ function getEventKey(nativeEvent) {
 
 module.exports = getEventKey;
 
-},{"./getEventCharCode":126}],128:[function(require,module,exports){
+},{"./getEventCharCode":128}],130:[function(require,module,exports){
 /**
  * Copyright 2013 Facebook, Inc.
  * All rights reserved.
@@ -21520,7 +23565,7 @@ function getEventModifierState(nativeEvent) {
 
 module.exports = getEventModifierState;
 
-},{}],129:[function(require,module,exports){
+},{}],131:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21551,7 +23596,7 @@ function getEventTarget(nativeEvent) {
 
 module.exports = getEventTarget;
 
-},{}],130:[function(require,module,exports){
+},{}],132:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -21668,7 +23713,7 @@ function getMarkupWrap(nodeName) {
 module.exports = getMarkupWrap;
 
 }).call(this,require('_process'))
-},{"./ExecutionEnvironment":33,"./invariant":138,"_process":1}],131:[function(require,module,exports){
+},{"./ExecutionEnvironment":35,"./invariant":140,"_process":1}],133:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21743,7 +23788,7 @@ function getNodeForCharacterOffset(root, offset) {
 
 module.exports = getNodeForCharacterOffset;
 
-},{}],132:[function(require,module,exports){
+},{}],134:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21778,7 +23823,7 @@ function getReactRootElementInContainer(container) {
 
 module.exports = getReactRootElementInContainer;
 
-},{}],133:[function(require,module,exports){
+},{}],135:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21815,7 +23860,7 @@ function getTextContentAccessor() {
 
 module.exports = getTextContentAccessor;
 
-},{"./ExecutionEnvironment":33}],134:[function(require,module,exports){
+},{"./ExecutionEnvironment":35}],136:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21855,7 +23900,7 @@ function getUnboundedScrollPosition(scrollable) {
 
 module.exports = getUnboundedScrollPosition;
 
-},{}],135:[function(require,module,exports){
+},{}],137:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21888,7 +23933,7 @@ function hyphenate(string) {
 
 module.exports = hyphenate;
 
-},{}],136:[function(require,module,exports){
+},{}],138:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -21929,7 +23974,7 @@ function hyphenateStyleName(string) {
 
 module.exports = hyphenateStyleName;
 
-},{"./hyphenate":135}],137:[function(require,module,exports){
+},{"./hyphenate":137}],139:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -22043,7 +24088,7 @@ function instantiateReactComponent(element, parentCompositeType) {
 module.exports = instantiateReactComponent;
 
 }).call(this,require('_process'))
-},{"./ReactElement":64,"./ReactEmptyComponent":66,"./ReactLegacyElement":73,"./ReactNativeComponent":78,"./warning":157,"_process":1}],138:[function(require,module,exports){
+},{"./ReactElement":66,"./ReactEmptyComponent":68,"./ReactLegacyElement":75,"./ReactNativeComponent":80,"./warning":159,"_process":1}],140:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -22100,7 +24145,7 @@ var invariant = function(condition, format, a, b, c, d, e, f) {
 module.exports = invariant;
 
 }).call(this,require('_process'))
-},{"_process":1}],139:[function(require,module,exports){
+},{"_process":1}],141:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22165,7 +24210,7 @@ function isEventSupported(eventNameSuffix, capture) {
 
 module.exports = isEventSupported;
 
-},{"./ExecutionEnvironment":33}],140:[function(require,module,exports){
+},{"./ExecutionEnvironment":35}],142:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22193,7 +24238,7 @@ function isNode(object) {
 
 module.exports = isNode;
 
-},{}],141:[function(require,module,exports){
+},{}],143:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22237,7 +24282,7 @@ function isTextInputElement(elem) {
 
 module.exports = isTextInputElement;
 
-},{}],142:[function(require,module,exports){
+},{}],144:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22262,7 +24307,7 @@ function isTextNode(object) {
 
 module.exports = isTextNode;
 
-},{"./isNode":140}],143:[function(require,module,exports){
+},{"./isNode":142}],145:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22303,7 +24348,7 @@ function joinClasses(className/*, ... */) {
 
 module.exports = joinClasses;
 
-},{}],144:[function(require,module,exports){
+},{}],146:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -22358,7 +24403,7 @@ var keyMirror = function(obj) {
 module.exports = keyMirror;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],145:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],147:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22394,7 +24439,7 @@ var keyOf = function(oneKeyObj) {
 
 module.exports = keyOf;
 
-},{}],146:[function(require,module,exports){
+},{}],148:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22447,7 +24492,7 @@ function mapObject(object, callback, context) {
 
 module.exports = mapObject;
 
-},{}],147:[function(require,module,exports){
+},{}],149:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22481,7 +24526,7 @@ function memoizeStringOnly(callback) {
 
 module.exports = memoizeStringOnly;
 
-},{}],148:[function(require,module,exports){
+},{}],150:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -22515,7 +24560,7 @@ function monitorCodeUse(eventName, data) {
 module.exports = monitorCodeUse;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],149:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],151:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -22555,7 +24600,7 @@ function onlyChild(children) {
 module.exports = onlyChild;
 
 }).call(this,require('_process'))
-},{"./ReactElement":64,"./invariant":138,"_process":1}],150:[function(require,module,exports){
+},{"./ReactElement":66,"./invariant":140,"_process":1}],152:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22583,7 +24628,7 @@ if (ExecutionEnvironment.canUseDOM) {
 
 module.exports = performance || {};
 
-},{"./ExecutionEnvironment":33}],151:[function(require,module,exports){
+},{"./ExecutionEnvironment":35}],153:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22611,7 +24656,7 @@ var performanceNow = performance.now.bind(performance);
 
 module.exports = performanceNow;
 
-},{"./performance":150}],152:[function(require,module,exports){
+},{"./performance":152}],154:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22689,7 +24734,7 @@ if (ExecutionEnvironment.canUseDOM) {
 
 module.exports = setInnerHTML;
 
-},{"./ExecutionEnvironment":33}],153:[function(require,module,exports){
+},{"./ExecutionEnvironment":35}],155:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22733,7 +24778,7 @@ function shallowEqual(objA, objB) {
 
 module.exports = shallowEqual;
 
-},{}],154:[function(require,module,exports){
+},{}],156:[function(require,module,exports){
 /**
  * Copyright 2013-2014, Facebook, Inc.
  * All rights reserved.
@@ -22771,7 +24816,7 @@ function shouldUpdateReactComponent(prevElement, nextElement) {
 
 module.exports = shouldUpdateReactComponent;
 
-},{}],155:[function(require,module,exports){
+},{}],157:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -22843,7 +24888,7 @@ function toArray(obj) {
 module.exports = toArray;
 
 }).call(this,require('_process'))
-},{"./invariant":138,"_process":1}],156:[function(require,module,exports){
+},{"./invariant":140,"_process":1}],158:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2014, Facebook, Inc.
@@ -23026,7 +25071,7 @@ function traverseAllChildren(children, callback, traverseContext) {
 module.exports = traverseAllChildren;
 
 }).call(this,require('_process'))
-},{"./ReactElement":64,"./ReactInstanceHandles":72,"./invariant":138,"_process":1}],157:[function(require,module,exports){
+},{"./ReactElement":66,"./ReactInstanceHandles":74,"./invariant":140,"_process":1}],159:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014, Facebook, Inc.
@@ -23071,10 +25116,10 @@ if ("production" !== process.env.NODE_ENV) {
 module.exports = warning;
 
 }).call(this,require('_process'))
-},{"./emptyFunction":119,"_process":1}],158:[function(require,module,exports){
+},{"./emptyFunction":121,"_process":1}],160:[function(require,module,exports){
 module.exports = require('./lib/React');
 
-},{"./lib/React":40}],159:[function(require,module,exports){
+},{"./lib/React":42}],161:[function(require,module,exports){
 (function (global){
 
 var rng;
@@ -23109,7 +25154,7 @@ module.exports = rng;
 
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],160:[function(require,module,exports){
+},{}],162:[function(require,module,exports){
 //     uuid.js
 //
 //     Copyright (c) 2010-2012 Robert Kieffer
@@ -23294,7 +25339,7 @@ uuid.unparse = unparse;
 
 module.exports = uuid;
 
-},{"./rng":159}],161:[function(require,module,exports){
+},{"./rng":161}],163:[function(require,module,exports){
 (function (global){
 var $, Editor, defaultMarkdown, md2react;
 
@@ -23316,7 +25361,8 @@ Editor = React.createClass({
       content = md2react(editor.value, {
         gfm: true,
         breaks: true,
-        tables: true
+        tables: true,
+        commonmark: true
       });
       return this.setState({
         content: content
@@ -23414,9 +25460,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../src/index":162,"react":158}],162:[function(require,module,exports){
+},{"../src/index":164,"react":160}],164:[function(require,module,exports){
 var $, ATTR_WHITELIST, compile, getPropsFromHTMLNode, highlight, htmlWrapperComponent, isValidDocument, mdast, preprocess, rawValueWrapper, sanitize, toChildren, uuid,
-  __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
+  indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
 mdast = require('mdast');
 
@@ -23434,14 +25480,14 @@ toChildren = function(node, parentKey, tableAlign) {
     tableAlign = [];
   }
   return (function() {
-    var _i, _len, _ref, _results;
-    _ref = node.children;
-    _results = [];
-    for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-      child = _ref[i];
-      _results.push(compile(child, parentKey + '_' + i, tableAlign));
+    var j, len, ref, results;
+    ref = node.children;
+    results = [];
+    for (i = j = 0, len = ref.length; j < len; i = ++j) {
+      child = ref[i];
+      results.push(compile(child, parentKey + '_' + i, tableAlign));
     }
-    return _results;
+    return results;
   })();
 };
 
@@ -23452,7 +25498,7 @@ isValidDocument = function(doc) {
 };
 
 getPropsFromHTMLNode = function(node, attrWhitelist) {
-  var attr, attrs, doc, i, parser, props, string, _i, _ref, _ref1;
+  var attr, attrs, doc, i, j, parser, props, ref, ref1, string;
   string = node.subtype === 'folded' ? node.startTag.value + node.endTag.value : node.subtype === 'void' ? node.value : null;
   if (string == null) {
     return null;
@@ -23464,9 +25510,9 @@ getPropsFromHTMLNode = function(node, attrWhitelist) {
   }
   attrs = doc.body.firstElementChild.attributes;
   props = {};
-  for (i = _i = 0, _ref = attrs.length; 0 <= _ref ? _i < _ref : _i > _ref; i = 0 <= _ref ? ++_i : --_i) {
+  for (i = j = 0, ref = attrs.length; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
     attr = attrs.item(i);
-    if ((attrWhitelist == null) || (_ref1 = attr.name, __indexOf.call(attrWhitelist, _ref1) >= 0)) {
+    if ((attrWhitelist == null) || (ref1 = attr.name, indexOf.call(attrWhitelist, ref1) >= 0)) {
       props[attr.name] = attr.value;
     }
   }
@@ -23478,7 +25524,7 @@ sanitize = null;
 highlight = null;
 
 compile = function(node, parentKey, tableAlign) {
-  var className, k, key, props, _ref, _ref1;
+  var className, k, key, props, ref, ref1;
   if (parentKey == null) {
     parentKey = '_start';
   }
@@ -23568,12 +25614,12 @@ compile = function(node, parentKey, tableAlign) {
         $('tr', {
           key: key + '-_inner-tr'
         }, node.children.map(function(cell, i) {
-          var k, _ref;
+          var k, ref;
           k = key + '-th' + i;
           return $('th', {
             key: k,
             style: {
-              textAlign: (_ref = tableAlign[i]) != null ? _ref : 'left'
+              textAlign: (ref = tableAlign[i]) != null ? ref : 'left'
             }
           }, toChildren(cell, k));
         }))
@@ -23585,12 +25631,12 @@ compile = function(node, parentKey, tableAlign) {
         $('tr', {
           key: key + '-_inner-td'
         }, node.children.map(function(cell, i) {
-          var k, _ref;
+          var k, ref;
           k = key + '-td' + i;
           return $('td', {
             key: k,
             style: {
-              textAlign: (_ref = tableAlign[i]) != null ? _ref : 'left'
+              textAlign: (ref = tableAlign[i]) != null ? ref : 'left'
             }
           }, toChildren(cell, k));
         }))
@@ -23602,12 +25648,12 @@ compile = function(node, parentKey, tableAlign) {
     case 'html':
       if (node.subtype === 'folded') {
         k = key + '_' + node.tagName;
-        props = (_ref = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? _ref : {};
+        props = (ref = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref : {};
         props.key = k;
         return $(node.startTag.tagName, props, toChildren(node, k));
       } else if (node.subtype === 'void') {
         k = key + '_' + node.tagName;
-        props = (_ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? _ref1 : {};
+        props = (ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref1 : {};
         props.key = k;
         return $(node.tagName, props);
       } else if (node.subtype === 'special') {
@@ -23637,15 +25683,15 @@ htmlWrapperComponent = null;
 rawValueWrapper = null;
 
 module.exports = function(raw, options) {
-  var ast, _ref, _ref1, _ref2;
+  var ast, ref, ref1, ref2, ref3;
   if (options == null) {
     options = {};
   }
-  sanitize = (_ref = options.sanitize) != null ? _ref : true;
-  rawValueWrapper = (_ref1 = options.rawValueWrapper) != null ? _ref1 : function(text) {
+  sanitize = (ref = options.sanitize) != null ? ref : true;
+  rawValueWrapper = (ref1 = options.rawValueWrapper) != null ? ref1 : function(text) {
     return text;
   };
-  highlight = (_ref2 = options.highlight) != null ? _ref2 : function(code, lang, key) {
+  highlight = (ref2 = options.highlight) != null ? ref2 : function(code, lang, key) {
     return $('pre', {
       key: key,
       className: 'code'
@@ -23656,28 +25702,30 @@ module.exports = function(raw, options) {
     ]);
   };
   ast = mdast.parse(raw, options);
-  preprocess(ast);
+  ast = preprocess(ast);
+  ast = (ref3 = typeof options.preprocessAST === "function" ? options.preprocessAST(ast) : void 0) != null ? ref3 : ast;
   return compile(ast);
 };
 
 
 
-},{"./preprocess":163,"mdast":2,"uuid":160}],163:[function(require,module,exports){
+},{"./preprocess":165,"mdast":2,"uuid":162}],165:[function(require,module,exports){
 var createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, foldHTMLNodes, isVoidElement, preprocess;
 
 preprocess = function(root) {
   root.children = decomposeHTMLNodes(root.children);
-  return root.children = foldHTMLNodes(root.children);
+  root.children = foldHTMLNodes(root.children);
+  return root;
 };
 
 foldHTMLNodes = function(nodes) {
-  var children, folded, index, node, pNode, processedNodes, startTag, startTagIndex, _i, _j, _len, _len1;
+  var children, folded, i, index, j, len1, len2, node, pNode, processedNodes, startTag, startTagIndex;
   processedNodes = [];
-  for (_i = 0, _len = nodes.length; _i < _len; _i++) {
-    node = nodes[_i];
+  for (i = 0, len1 = nodes.length; i < len1; i++) {
+    node = nodes[i];
     if (node.subtype === 'end') {
       startTagIndex = null;
-      for (index = _j = 0, _len1 = processedNodes.length; _j < _len1; index = ++_j) {
+      for (index = j = 0, len2 = processedNodes.length; j < len2; index = ++j) {
         pNode = processedNodes[index];
         if (pNode.subtype === 'start' && pNode.tagName === node.tagName) {
           startTagIndex = index;
@@ -23709,10 +25757,10 @@ foldHTMLNodes = function(nodes) {
 };
 
 decomposeHTMLNodes = function(nodes) {
-  var fragmentNodes, node, processedNodes, _i, _len;
+  var fragmentNodes, i, len1, node, processedNodes;
   processedNodes = [];
-  for (_i = 0, _len = nodes.length; _i < _len; _i++) {
-    node = nodes[_i];
+  for (i = 0, len1 = nodes.length; i < len1; i++) {
+    node = nodes[i];
     if (node.type === 'html') {
       fragmentNodes = decomposeHTMLNode(node);
       if (fragmentNodes != null) {
@@ -23758,14 +25806,14 @@ decomposeHTMLString = function(str) {
 };
 
 createNodeFromHTMLFragment = function(str) {
-  var name, slash, subtype, _i, _ref, _ref1;
+  var i, name, ref, ref1, slash, subtype;
   if (/^[^<]/.test(str)) {
     return {
       type: 'text',
       value: str
     };
   }
-  _ref1 = (_ref = /^<(\/?)([0-9A-Z]+)/i.exec(str)) != null ? _ref : [], _i = _ref1.length - 2, slash = _ref1[_i++], name = _ref1[_i++];
+  ref1 = (ref = /^<(\/?)([0-9A-Z]+)/i.exec(str)) != null ? ref : [], i = ref1.length - 2, slash = ref1[i++], name = ref1[i++];
   subtype = name == null ? 'special' : slash === '/' ? 'end' : isVoidElement(name) ? 'void' : 'start';
   return {
     type: 'html',
@@ -23785,4 +25833,4 @@ module.exports = preprocess;
 
 
 
-},{}]},{},[161]);
+},{}]},{},[163]);
