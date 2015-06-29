@@ -6,9 +6,9 @@ ATTR_WHITELIST = ['href', 'src', 'target']
 
 $ = React.createElement
 
-toChildren = (node, parentKey, tableAlign = []) ->
+toChildren = (node, defs, parentKey, tableAlign = []) ->
   return (for child, i in node.children
-    compile(child, parentKey+'_'+i, tableAlign))
+    compile(child, defs, parentKey+'_'+i, tableAlign))
 
 isValidDocument = (doc) ->
   parsererrorNS = (new DOMParser()).parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
@@ -41,7 +41,7 @@ getPropsFromHTMLNode = (node, attrWhitelist) ->
 # Override by option
 sanitize = null
 highlight = null
-compile = (node, parentKey='_start', tableAlign = null) ->
+compile = (node, defs, parentKey='_start', tableAlign = null) ->
   key = parentKey+'_'+node.type
 
   switch node.type
@@ -55,14 +55,14 @@ compile = (node, parentKey='_start', tableAlign = null) ->
     when 'code'           then highlight node.value, node.lang, key
 
     # Has children
-    when 'root'       then $ 'div', {key}, toChildren(node, key)
-    when 'strong'     then $ 'strong', {key}, toChildren(node, key)
-    when 'emphasis'   then $ 'em', {key}, toChildren(node, key)
-    when 'delete'     then $ 's', {key}, toChildren(node, key)
-    when 'paragraph'  then $ 'p', {key}, toChildren(node, key)
-    when 'link'       then $ 'a', {key, href: node.href, title: node.title}, toChildren(node, key)
-    when 'heading'    then $ ('h'+node.depth.toString()), {key}, toChildren(node, key)
-    when 'list'       then $ (if node.ordered then 'ol' else 'ul'), {key}, toChildren(node, key)
+    when 'root'       then $ 'div', {key}, toChildren(node, defs, key)
+    when 'strong'     then $ 'strong', {key}, toChildren(node, defs, key)
+    when 'emphasis'   then $ 'em', {key}, toChildren(node, defs, key)
+    when 'delete'     then $ 's', {key}, toChildren(node, defs, key)
+    when 'paragraph'  then $ 'p', {key}, toChildren(node, defs, key)
+    when 'link'       then $ 'a', {key, href: node.href, title: node.title}, toChildren(node, defs, key)
+    when 'heading'    then $ ('h'+node.depth.toString()), {key}, toChildren(node, defs, key)
+    when 'list'       then $ (if node.ordered then 'ol' else 'ul'), {key}, toChildren(node, defs, key)
     when 'listItem'
       className =
         if node.checked is true
@@ -71,11 +71,61 @@ compile = (node, parentKey='_start', tableAlign = null) ->
           'unchecked'
         else
           ''
-      $ 'li', {key, className}, toChildren(node, key)
-    when 'blockquote' then $ 'blockquote', {key}, toChildren(node, key)
+      $ 'li', {key, className}, toChildren(node, defs, key)
+    when 'blockquote' then $ 'blockquote', {key}, toChildren(node, defs, key)
+
+    when 'linkReference'
+      attrs = {key, href: '', title: ''}
+      for def in defs
+        if def.type is 'definition' and def.identifier is node.identifier
+          attrs.href = def.link
+          attrs.title = def.title
+          break
+      $ 'a', attrs, toChildren(node, defs, key)
+
+    # Footnote
+    when 'footnoteReference'
+      title = ''
+      for def in defs
+        if def.footnoteNumber is node.footnoteNumber
+          title = def.link
+          break
+      $ 'sup', {key, id: "fnref#{node.footnoteNumber}"}, [
+        $ 'a', {key: key+'-a', href: "#fn#{node.footnoteNumber}", title}, "#{node.footnoteNumber}"
+      ]
+    when 'footnoteDefinitionCollection'
+      items = node.children.map (def, i) ->
+        k = key+'-ol-li'+i
+        # If `def` has children, we use them as `defBody`. And If `def` doesn't
+        # have any, then it should have `link` text, so we use it.
+        defBody = null
+        if def.children?
+          # If `def`s last child is a paragraph, append an anchor to `defBody`.
+          # Otherwise we append nothing like Qiita does.
+          # FIXME: We should not mutate a given AST.
+          if (para = def.children[def.children.length - 1]).type is 'paragraph'
+            para.children.push
+              type: 'text'
+              value: ' '
+            para.children.push
+              type: 'link'
+              href: "#fnref#{def.footnoteNumber}"
+              children: [{type: 'text', value: '↩'}]
+          defBody = toChildren(def, defs, key)
+        else
+          defBody = $ 'p', {key: k+'-p'}, [
+            def.link
+            ' '
+            $ 'a', {key: k+'-p-a', href: "#fnref#{def.footnoteNumber}"}, '↩'
+          ]
+        $ 'li', {key: k, id: "fn#{def.footnoteNumber}"}, defBody
+      $ 'div', {key, class: 'footnotes'}, [
+        $ 'hr', {key: key+'-hr'}
+        $ 'ol', {key: key+'-ol'}, items
+      ]
 
     # Table
-    when 'table'       then $ 'table', {key}, toChildren(node, key, node.align)
+    when 'table'       then $ 'table', {key}, toChildren(node, defs, key, node.align)
     when 'tableHeader'
       $ 'thead', {key}, [
         $ 'tr', {key: key+'-_inner-tr'}, node.children.map (cell, i) ->
@@ -84,13 +134,13 @@ compile = (node, parentKey='_start', tableAlign = null) ->
       ]
 
     when 'tableRow'
-      # $ 'tr', {key}  , [$ 'td', {key: key+'_inner-td'}, toChildren(node, key)]
+      # $ 'tr', {key}  , [$ 'td', {key: key+'_inner-td'}, toChildren(node, defs, key)]
       $ 'tbody', {key}, [
         $ 'tr', {key: key+'-_inner-td'}, node.children.map (cell, i) ->
           k = key+'-td'+i
           $ 'td', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
       ]
-    when 'tableCell'   then $ 'span', {key}, toChildren(node, key)
+    when 'tableCell'   then $ 'span', {key}, toChildren(node, defs, key)
 
     # Raw html
     when 'html'
@@ -98,7 +148,7 @@ compile = (node, parentKey='_start', tableAlign = null) ->
         k = key+'_'+node.tagName
         props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
         props.key = k
-        $ node.startTag.tagName, props, toChildren(node, k)
+        $ node.startTag.tagName, props, toChildren(node, defs, k)
       else if node.subtype is 'void'
         k = key+'_'+node.tagName
         props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
@@ -134,6 +184,6 @@ module.exports = (raw, options = {}) ->
       $ 'code', {key: key+'-_inner-code'}, code
     ]
   ast = mdast.parse raw, options
-  ast = preprocess(ast)
+  [ast, defs] = preprocess(ast, options)
   ast = options.preprocessAST?(ast) ? ast
-  compile(ast)
+  compile(ast, defs)

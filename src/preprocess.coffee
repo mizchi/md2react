@@ -1,7 +1,88 @@
-preprocess = (root) ->
+preprocess = (root, options) ->
   root.children = decomposeHTMLNodes(root.children)
   root.children = foldHTMLNodes(root.children)
-  root
+  if options.footnotes
+    mapping = defineFootnoteNumber(root)
+    applyFootnoteNumber(root, mapping)
+  defs = removeDefinitions(root)
+  if options.footnotes
+    appendFootnoteDefinitionCollection(root, defs)
+  [root, defs]
+
+# Sets `footnoteNumber` property to every footnote reference node.
+# Footnote number starts at 1 and is incremented whenever a new footnote
+# identifier appears.
+#
+# Example (Markdown):
+#
+#     first footnote[^foo]            # footnoteNumber for [^foo] is 1
+#     second footnote[^bar]           # footnoteNumber for [^bar] is 2
+#     use first footnote again[^foo]  # footnoteNumber for [^foo] is 1
+#     yet another footnote[^qux]      # footnoteNumber for [^qux] is 3
+defineFootnoteNumber = (node, num = 1, mapping = {}) ->
+  return {} unless node.children?
+  for child in node.children
+    if child.type is 'footnoteReference'
+      id = child.identifier
+      unless mapping[id]?
+        mapping[id] = num
+        num += 1
+      child.footnoteNumber = mapping[id]
+    defineFootnoteNumber(child, num, mapping)
+  mapping
+
+# Sets `footnoteNumber` property to every footnote definition node using a
+# given identifier-to-number mapping. `footnoteNumber` of a definition with
+# undefined identifier will be 0.
+#
+# Example (Markdown):
+#
+#     Given mapping = `{"foo": 1, "bar": 2, "qux": 3}`,
+#
+#     [^bar]: this is bar    # footnoteNumber for this node is 2
+#     [^foo]: this is foo    # footnoteNumber for this node is 1
+#     [^qux]: this is qux    # footnoteNumber for this node is 3
+#     [^xxx]: this is undef  # footnoteNumber for this node is 0
+applyFootnoteNumber = (node, mapping) ->
+  return unless node.children?
+  for child in node.children
+    # Workaround:
+    # Footnote definition nodes are supposed to have `footnoteDefinition` type
+    # but mdast v0.24.0 classifies them as `definition` type if their body
+    # doesn't contain whitespace (e.g. `[^foo]: body_without_space`).
+    isFootnoteDefLike = child.type is 'definition' and /^[^]/.test(child.identifier)
+    if child.type is 'footnoteDefinition' or isFootnoteDefLike
+      id = if isFootnoteDefLike then child.identifier.slice(1) else child.identifier
+      child.footnoteNumber = mapping[id] || 0
+    applyFootnoteNumber(child, mapping)
+
+# Appends a `footnoteDefinitionCollection` node to `node.children` if `defs`
+# contains one or more footnote definition nodes which `footnoteNumber` is > 0.
+# Otherwise, do nothing.
+# Elements of the collection are sorted by their `footnoteNumber` in ascending
+# order.
+appendFootnoteDefinitionCollection = (node, defs) ->
+  footnoteDefs = (def for def in defs when def.footnoteNumber? and def.footnoteNumber > 0)
+  footnoteDefs.sort (a, b) ->
+    a.footnoteNumber - b.footnoteNumber
+  if footnoteDefs.length > 0
+    node.children.push({type: 'footnoteDefinitionCollection', children: footnoteDefs})
+
+# Removes all footnote or link definition nodes from a given AST and returns
+# removed nodes.
+removeDefinitions = (node) ->
+  return [] unless node.children?
+  children = []
+  defs = []
+  for child in node.children
+    if child.type in ['definition', 'footnoteDefinition']
+      defs.push(child)
+    else
+      childDefs = removeDefinitions(child)
+      Array::push.apply(defs, childDefs)
+      children.push(child)
+  node.children = children
+  defs
 
 # Returns nodes by converting each occurrence of a series of nodes enclosed by
 # a "start" and an "end" HTML node into one "folded" HTML node. A folded node
