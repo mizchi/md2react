@@ -75,24 +75,35 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
     when 'blockquote' then $ 'blockquote', {key}, toChildren(node, defs, key)
 
     when 'linkReference'
-      attrs = {key, href: '', title: ''}
       for def in defs
         if def.type is 'definition' and def.identifier is node.identifier
-          attrs.href = def.link
-          attrs.title = def.title
-          break
-      $ 'a', attrs, toChildren(node, defs, key)
+          return $ 'a', {key, href: def.link, title: def.title}, toChildren(node, defs, key)
+      # There's no corresponding definition; render reference as plain text.
+      if node.referenceType is 'full'
+        $ 'span', {key}, [
+          '['
+          toChildren(node, defs, key)
+          ']'
+          "[#{node.identifier}]"
+        ]
+      else # referenceType must be 'shortcut'
+        $ 'span', {key}, [
+          '['
+          toChildren(node, defs, key)
+          ']'
+        ]
 
     # Footnote
     when 'footnoteReference'
       title = ''
       for def in defs
         if def.footnoteNumber is node.footnoteNumber
-          title = def.link
-          break
-      $ 'sup', {key, id: "fnref#{node.footnoteNumber}"}, [
-        $ 'a', {key: key+'-a', href: "#fn#{node.footnoteNumber}", title}, "#{node.footnoteNumber}"
-      ]
+          title = def.link ? "..." # FIXME: use def.children (stringification needed)
+          return $ 'sup', {key, id: "fnref#{node.footnoteNumber}"}, [
+            $ 'a', {key: key+'-a', href: "#fn#{node.footnoteNumber}", title}, "#{node.footnoteNumber}"
+          ]
+      # There's no corresponding definition; render reference as plain text.
+      $ 'span', {key}, "[^#{node.identifier}]"
     when 'footnoteDefinitionCollection'
       items = node.children.map (def, i) ->
         k = key+'-ol-li'+i
