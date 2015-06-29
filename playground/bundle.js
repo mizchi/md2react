@@ -25525,7 +25525,7 @@ sanitize = null;
 highlight = null;
 
 compile = function(node, defs, parentKey, tableAlign) {
-  var attrs, className, def, items, j, k, key, l, len, len1, props, ref, ref1, title;
+  var className, def, items, j, k, key, l, len, len1, props, ref, ref1, ref2, title;
   if (parentKey == null) {
     parentKey = '_start';
   }
@@ -25605,39 +25605,47 @@ compile = function(node, defs, parentKey, tableAlign) {
         key: key
       }, toChildren(node, defs, key));
     case 'linkReference':
-      attrs = {
-        key: key,
-        href: '',
-        title: ''
-      };
       for (j = 0, len = defs.length; j < len; j++) {
         def = defs[j];
         if (def.type === 'definition' && def.identifier === node.identifier) {
-          attrs.href = def.link;
-          attrs.title = def.title;
-          break;
+          return $('a', {
+            key: key,
+            href: def.link,
+            title: def.title
+          }, toChildren(node, defs, key));
         }
       }
-      return $('a', attrs, toChildren(node, defs, key));
+      if (node.referenceType === 'full') {
+        return $('span', {
+          key: key
+        }, ['[', toChildren(node, defs, key), ']', "[" + node.identifier + "]"]);
+      } else {
+        return $('span', {
+          key: key
+        }, ['[', toChildren(node, defs, key), ']']);
+      }
+      break;
     case 'footnoteReference':
       title = '';
       for (l = 0, len1 = defs.length; l < len1; l++) {
         def = defs[l];
         if (def.footnoteNumber === node.footnoteNumber) {
-          title = def.link;
-          break;
+          title = (ref = def.link) != null ? ref : "...";
+          return $('sup', {
+            key: key,
+            id: "fnref" + node.footnoteNumber
+          }, [
+            $('a', {
+              key: key + '-a',
+              href: "#fn" + node.footnoteNumber,
+              title: title
+            }, "" + node.footnoteNumber)
+          ]);
         }
       }
-      return $('sup', {
-        key: key,
-        id: "fnref" + node.footnoteNumber
-      }, [
-        $('a', {
-          key: key + '-a',
-          href: "#fn" + node.footnoteNumber,
-          title: title
-        }, "" + node.footnoteNumber)
-      ]);
+      return $('span', {
+        key: key
+      }, "[^" + node.identifier + "]");
     case 'footnoteDefinitionCollection':
       items = node.children.map(function(def, i) {
         var defBody, k, para;
@@ -25697,12 +25705,12 @@ compile = function(node, defs, parentKey, tableAlign) {
         $('tr', {
           key: key + '-_inner-tr'
         }, node.children.map(function(cell, i) {
-          var k, ref;
+          var k, ref1;
           k = key + '-th' + i;
           return $('th', {
             key: k,
             style: {
-              textAlign: (ref = tableAlign[i]) != null ? ref : 'left'
+              textAlign: (ref1 = tableAlign[i]) != null ? ref1 : 'left'
             }
           }, toChildren(cell, k));
         }))
@@ -25714,12 +25722,12 @@ compile = function(node, defs, parentKey, tableAlign) {
         $('tr', {
           key: key + '-_inner-td'
         }, node.children.map(function(cell, i) {
-          var k, ref;
+          var k, ref1;
           k = key + '-td' + i;
           return $('td', {
             key: k,
             style: {
-              textAlign: (ref = tableAlign[i]) != null ? ref : 'left'
+              textAlign: (ref1 = tableAlign[i]) != null ? ref1 : 'left'
             }
           }, toChildren(cell, k));
         }))
@@ -25731,12 +25739,12 @@ compile = function(node, defs, parentKey, tableAlign) {
     case 'html':
       if (node.subtype === 'folded') {
         k = key + '_' + node.tagName;
-        props = (ref = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref : {};
+        props = (ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref1 : {};
         props.key = k;
         return $(node.startTag.tagName, props, toChildren(node, defs, k));
       } else if (node.subtype === 'void') {
         k = key + '_' + node.tagName;
-        props = (ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref1 : {};
+        props = (ref2 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref2 : {};
         props.key = k;
         return $(node.tagName, props);
       } else if (node.subtype === 'special') {
