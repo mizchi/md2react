@@ -25362,7 +25362,8 @@ Editor = React.createClass({
         gfm: true,
         breaks: true,
         tables: true,
-        commonmark: true
+        commonmark: true,
+        footnotes: true
       });
       return this.setState({
         content: content
@@ -25474,7 +25475,7 @@ ATTR_WHITELIST = ['href', 'src', 'target'];
 
 $ = React.createElement;
 
-toChildren = function(node, parentKey, tableAlign) {
+toChildren = function(node, defs, parentKey, tableAlign) {
   var child, i;
   if (tableAlign == null) {
     tableAlign = [];
@@ -25485,7 +25486,7 @@ toChildren = function(node, parentKey, tableAlign) {
     results = [];
     for (i = j = 0, len = ref.length; j < len; i = ++j) {
       child = ref[i];
-      results.push(compile(child, parentKey + '_' + i, tableAlign));
+      results.push(compile(child, defs, parentKey + '_' + i, tableAlign));
     }
     return results;
   })();
@@ -25523,8 +25524,8 @@ sanitize = null;
 
 highlight = null;
 
-compile = function(node, parentKey, tableAlign) {
-  var className, k, key, props, ref, ref1;
+compile = function(node, defs, parentKey, tableAlign) {
+  var attrs, className, def, items, j, k, key, l, len, len1, props, ref, ref1, title;
   if (parentKey == null) {
     parentKey = '_start';
   }
@@ -25562,51 +25563,133 @@ compile = function(node, parentKey, tableAlign) {
     case 'root':
       return $('div', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'strong':
       return $('strong', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'emphasis':
       return $('em', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'delete':
       return $('s', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'paragraph':
       return $('p', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'link':
       return $('a', {
         key: key,
         href: node.href,
         title: node.title
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'heading':
       return $('h' + node.depth.toString(), {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'list':
       return $((node.ordered ? 'ol' : 'ul'), {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'listItem':
       className = node.checked === true ? 'checked' : node.checked === false ? 'unchecked' : '';
       return $('li', {
         key: key,
         className: className
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'blockquote':
       return $('blockquote', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
+    case 'linkReference':
+      attrs = {
+        key: key,
+        href: '',
+        title: ''
+      };
+      for (j = 0, len = defs.length; j < len; j++) {
+        def = defs[j];
+        if (def.type === 'definition' && def.identifier === node.identifier) {
+          attrs.href = def.link;
+          attrs.title = def.title;
+          break;
+        }
+      }
+      return $('a', attrs, toChildren(node, defs, key));
+    case 'footnoteReference':
+      title = '';
+      for (l = 0, len1 = defs.length; l < len1; l++) {
+        def = defs[l];
+        if (def.footnoteNumber === node.footnoteNumber) {
+          title = def.link;
+          break;
+        }
+      }
+      return $('sup', {
+        key: key,
+        id: "fnref" + node.footnoteNumber
+      }, [
+        $('a', {
+          key: key + '-a',
+          href: "#fn" + node.footnoteNumber,
+          title: title
+        }, "" + node.footnoteNumber)
+      ]);
+    case 'footnoteDefinitionCollection':
+      items = node.children.map(function(def, i) {
+        var defBody, k, para;
+        k = key + '-ol-li' + i;
+        defBody = null;
+        if (def.children != null) {
+          if ((para = def.children[def.children.length - 1]).type === 'paragraph') {
+            para.children.push({
+              type: 'text',
+              value: ' '
+            });
+            para.children.push({
+              type: 'link',
+              href: "#fnref" + def.footnoteNumber,
+              children: [
+                {
+                  type: 'text',
+                  value: '↩'
+                }
+              ]
+            });
+          }
+          defBody = toChildren(def, defs, key);
+        } else {
+          defBody = $('p', {
+            key: k + '-p'
+          }, [
+            def.link, ' ', $('a', {
+              key: k + '-p-a',
+              href: "#fnref" + def.footnoteNumber
+            }, '↩')
+          ]);
+        }
+        return $('li', {
+          key: k,
+          id: "fn" + def.footnoteNumber
+        }, defBody);
+      });
+      return $('div', {
+        key: key,
+        "class": 'footnotes'
+      }, [
+        $('hr', {
+          key: key + '-hr'
+        }), $('ol', {
+          key: key + '-ol'
+        }, items)
+      ]);
     case 'table':
       return $('table', {
         key: key
-      }, toChildren(node, key, node.align));
+      }, toChildren(node, defs, key, node.align));
     case 'tableHeader':
       return $('thead', {
         key: key
@@ -25644,13 +25727,13 @@ compile = function(node, parentKey, tableAlign) {
     case 'tableCell':
       return $('span', {
         key: key
-      }, toChildren(node, key));
+      }, toChildren(node, defs, key));
     case 'html':
       if (node.subtype === 'folded') {
         k = key + '_' + node.tagName;
         props = (ref = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref : {};
         props.key = k;
-        return $(node.startTag.tagName, props, toChildren(node, k));
+        return $(node.startTag.tagName, props, toChildren(node, defs, k));
       } else if (node.subtype === 'void') {
         k = key + '_' + node.tagName;
         props = (ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref1 : {};
@@ -25683,7 +25766,7 @@ htmlWrapperComponent = null;
 rawValueWrapper = null;
 
 module.exports = function(raw, options) {
-  var ast, ref, ref1, ref2, ref3;
+  var ast, defs, ref, ref1, ref2, ref3, ref4;
   if (options == null) {
     options = {};
   }
@@ -25702,20 +25785,121 @@ module.exports = function(raw, options) {
     ]);
   };
   ast = mdast.parse(raw, options);
-  ast = preprocess(ast);
-  ast = (ref3 = typeof options.preprocessAST === "function" ? options.preprocessAST(ast) : void 0) != null ? ref3 : ast;
-  return compile(ast);
+  ref3 = preprocess(ast, options), ast = ref3[0], defs = ref3[1];
+  ast = (ref4 = typeof options.preprocessAST === "function" ? options.preprocessAST(ast) : void 0) != null ? ref4 : ast;
+  return compile(ast, defs);
 };
 
 
 
 },{"./preprocess":165,"mdast":2,"uuid":162}],165:[function(require,module,exports){
-var createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, foldHTMLNodes, isVoidElement, preprocess;
+var appendFootnoteDefinitionCollection, applyFootnoteNumber, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions;
 
-preprocess = function(root) {
+preprocess = function(root, options) {
+  var defs, mapping;
   root.children = decomposeHTMLNodes(root.children);
   root.children = foldHTMLNodes(root.children);
-  return root;
+  if (options.footnotes) {
+    mapping = defineFootnoteNumber(root);
+    applyFootnoteNumber(root, mapping);
+  }
+  defs = removeDefinitions(root);
+  if (options.footnotes) {
+    appendFootnoteDefinitionCollection(root, defs);
+  }
+  return [root, defs];
+};
+
+defineFootnoteNumber = function(node, num, mapping) {
+  var child, i, id, len1, ref;
+  if (num == null) {
+    num = 1;
+  }
+  if (mapping == null) {
+    mapping = {};
+  }
+  if (node.children == null) {
+    return {};
+  }
+  ref = node.children;
+  for (i = 0, len1 = ref.length; i < len1; i++) {
+    child = ref[i];
+    if (child.type === 'footnoteReference') {
+      id = child.identifier;
+      if (mapping[id] == null) {
+        mapping[id] = num;
+        num += 1;
+      }
+      child.footnoteNumber = mapping[id];
+    }
+    defineFootnoteNumber(child, num, mapping);
+  }
+  return mapping;
+};
+
+applyFootnoteNumber = function(node, mapping) {
+  var child, i, id, isFootnoteDefLike, len1, ref, results;
+  if (node.children == null) {
+    return;
+  }
+  ref = node.children;
+  results = [];
+  for (i = 0, len1 = ref.length; i < len1; i++) {
+    child = ref[i];
+    isFootnoteDefLike = child.type === 'definition' && /^[^]/.test(child.identifier);
+    if (child.type === 'footnoteDefinition' || isFootnoteDefLike) {
+      id = isFootnoteDefLike ? child.identifier.slice(1) : child.identifier;
+      child.footnoteNumber = mapping[id] || 0;
+    }
+    results.push(applyFootnoteNumber(child, mapping));
+  }
+  return results;
+};
+
+appendFootnoteDefinitionCollection = function(node, defs) {
+  var def, footnoteDefs;
+  footnoteDefs = (function() {
+    var i, len1, results;
+    results = [];
+    for (i = 0, len1 = defs.length; i < len1; i++) {
+      def = defs[i];
+      if ((def.footnoteNumber != null) && def.footnoteNumber > 0) {
+        results.push(def);
+      }
+    }
+    return results;
+  })();
+  footnoteDefs.sort(function(a, b) {
+    return a.footnoteNumber - b.footnoteNumber;
+  });
+  if (footnoteDefs.length > 0) {
+    return node.children.push({
+      type: 'footnoteDefinitionCollection',
+      children: footnoteDefs
+    });
+  }
+};
+
+removeDefinitions = function(node) {
+  var child, childDefs, children, defs, i, len1, ref, ref1;
+  if (node.children == null) {
+    return [];
+  }
+  children = [];
+  defs = [];
+  ref = node.children;
+  for (i = 0, len1 = ref.length; i < len1; i++) {
+    child = ref[i];
+    if ((ref1 = child.type) === 'definition' || ref1 === 'footnoteDefinition') {
+      defs.push(child);
+    } else {
+      childDefs = removeDefinitions(child);
+      Array.prototype.push.apply(defs, childDefs);
+      children.push(child);
+    }
+  }
+  node.children = children;
+  return defs;
 };
 
 foldHTMLNodes = function(nodes) {
