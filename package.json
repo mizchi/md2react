@@ -1,6 +1,6 @@
 {
   "name": "md2react",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "markdown to react element",
   "main": "lib/index.js",
   "keywords": [
