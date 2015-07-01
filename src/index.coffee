@@ -6,9 +6,9 @@ ATTR_WHITELIST = ['href', 'src', 'target']
 
 $ = React.createElement
 
-toChildren = (node, defs, parentKey, tableAlign = []) ->
+toChildren = (node, defs, parentKey, tableAlign = [], ids) ->
   return (for child, i in node.children
-    compile(child, defs, parentKey+'_'+i, tableAlign))
+    compile(child, defs, parentKey+'_'+i, tableAlign, ids))
 
 isValidDocument = (doc) ->
   parsererrorNS = (new DOMParser()).parseFromString('INVALID', 'text/xml').getElementsByTagName("parsererror")[0].namespaceURI
@@ -41,7 +41,7 @@ getPropsFromHTMLNode = (node, attrWhitelist) ->
 # Override by option
 sanitize = null
 highlight = null
-compile = (node, defs, parentKey='_start', tableAlign = null) ->
+compile = (node, defs, parentKey='_start', tableAlign = null, ids = {}) ->
   key = parentKey+'_'+node.type
 
   switch node.type
@@ -55,14 +55,29 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
     when 'code'           then highlight node.value, node.lang, key
 
     # Has children
-    when 'root'       then $ 'div', {key}, toChildren(node, defs, key)
-    when 'strong'     then $ 'strong', {key}, toChildren(node, defs, key)
-    when 'emphasis'   then $ 'em', {key}, toChildren(node, defs, key)
-    when 'delete'     then $ 's', {key}, toChildren(node, defs, key)
-    when 'paragraph'  then $ 'p', {key}, toChildren(node, defs, key)
-    when 'link'       then $ 'a', {key, href: node.href, title: node.title}, toChildren(node, defs, key)
-    when 'heading'    then $ ('h'+node.depth.toString()), {key}, toChildren(node, defs, key)
-    when 'list'       then $ (if node.ordered then 'ol' else 'ul'), {key}, toChildren(node, defs, key)
+    when 'root'       then $ 'div', {key}, toChildren(node, defs, key, null, ids)
+    when 'strong'     then $ 'strong', {key}, toChildren(node, defs, key, null, ids)
+    when 'emphasis'   then $ 'em', {key}, toChildren(node, defs, key, null, ids)
+    when 'delete'     then $ 's', {key}, toChildren(node, defs, key, null, ids)
+    when 'paragraph'  then $ 'p', {key}, toChildren(node, defs, key, null, ids)
+    when 'link'       then $ 'a', {key, href: node.href, title: node.title}, toChildren(node, defs, key, null, ids)
+    when 'heading'
+      text = node.children.filter (child) -> child.type is 'text'
+        .map (child) -> child.value
+        .join ''
+      id = text.toLowerCase().replace(/\s/g, '-').replace(/[!<>#%@&='"`:;,\.\*\+\(\)\{\}\[\]\\\/\|\?\^\$]+/g, '')
+      if !ids[id]?
+        ids[id] = 0
+      else
+        ids[id]++
+        id = "#{id}-#{ids[id]}"
+      $ ('h'+node.depth.toString()), {key}, [
+        $ 'a', {key: key+'-a', id: id, className: 'anchor', href: "##{id}"}, [
+          $ 'span', {key: key+'-a-span', className: 'icon icon-link'}
+        ]
+        toChildren(node, defs, key, null, ids)
+      ]
+    when 'list'       then $ (if node.ordered then 'ol' else 'ul'), {key}, toChildren(node, defs, key, null, ids)
     when 'listItem'
       className =
         if node.checked is true
@@ -71,25 +86,25 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
           'unchecked'
         else
           ''
-      $ 'li', {key, className}, toChildren(node, defs, key)
-    when 'blockquote' then $ 'blockquote', {key}, toChildren(node, defs, key)
+      $ 'li', {key, className}, toChildren(node, defs, key, null, ids)
+    when 'blockquote' then $ 'blockquote', {key}, toChildren(node, defs, key, null, ids)
 
     when 'linkReference'
       for def in defs
         if def.type is 'definition' and def.identifier is node.identifier
-          return $ 'a', {key, href: def.link, title: def.title}, toChildren(node, defs, key)
+          return $ 'a', {key, href: def.link, title: def.title}, toChildren(node, defs, key, null, ids)
       # There's no corresponding definition; render reference as plain text.
       if node.referenceType is 'full'
         $ 'span', {key}, [
           '['
-          toChildren(node, defs, key)
+          toChildren(node, defs, key, null, ids)
           ']'
           "[#{node.identifier}]"
         ]
       else # referenceType must be 'shortcut'
         $ 'span', {key}, [
           '['
-          toChildren(node, defs, key)
+          toChildren(node, defs, key, null, ids)
           ']'
         ]
 
@@ -122,7 +137,7 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
               type: 'link'
               href: "#fnref#{def.footnoteNumber}"
               children: [{type: 'text', value: '↩'}]
-          defBody = toChildren(def, defs, key)
+          defBody = toChildren(def, defs, key, null, ids)
         else
           defBody = $ 'p', {key: k+'-p'}, [
             def.link
@@ -136,12 +151,12 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
       ]
 
     # Table
-    when 'table'       then $ 'table', {key}, toChildren(node, defs, key, node.align)
+    when 'table'       then $ 'table', {key}, toChildren(node, defs, key, node.align, ids)
     when 'tableHeader'
       $ 'thead', {key}, [
         $ 'tr', {key: key+'-_inner-tr'}, node.children.map (cell, i) ->
           k = key+'-th'+i
-          $ 'th', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
+          $ 'th', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, defs, k, null, ids)
       ]
 
     when 'tableRow'
@@ -149,9 +164,9 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
       $ 'tbody', {key}, [
         $ 'tr', {key: key+'-_inner-td'}, node.children.map (cell, i) ->
           k = key+'-td'+i
-          $ 'td', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
+          $ 'td', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, defs, k, null, ids)
       ]
-    when 'tableCell'   then $ 'span', {key}, toChildren(node, defs, key)
+    when 'tableCell'   then $ 'span', {key}, toChildren(node, defs, key, null, ids)
 
     # Raw html
     when 'html'
@@ -159,7 +174,7 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
         k = key+'_'+node.tagName
         props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
         props.key = k
-        $ node.startTag.tagName, props, toChildren(node, defs, k)
+        $ node.startTag.tagName, props, toChildren(node, defs, k, null, ids)
       else if node.subtype is 'void'
         k = key+'_'+node.tagName
         props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
