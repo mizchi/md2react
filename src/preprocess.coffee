@@ -1,12 +1,20 @@
 preprocess = (root, options) ->
+  # Formalize HTML tags.
   root.children = decomposeHTMLNodes(root.children)
   root.children = foldHTMLNodes(root.children)
+
+  # Process footnotes and and links.
   if options.footnotes
     mapping = defineFootnoteNumber(root)
     applyFootnoteNumber(root, mapping)
   defs = removeDefinitions(root)
   if options.footnotes
     appendFootnoteDefinitionCollection(root, defs)
+
+  # Sanitize HTML tags.
+  root = wrapHTMLNodeInParagraph(root)
+  root = sanitizeTag(root)
+
   [root, defs]
 
 # Sets `footnoteNumber` property to every footnote reference node.
@@ -193,5 +201,71 @@ createNodeFromHTMLFragment = (str) ->
 isVoidElement = (elementName) ->
   voidElementNames = ['area', 'base', 'br', 'col', 'command', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']
   voidElementNames.indexOf(elementName) != -1
+
+# Wraps each top-level HTML node in a paragraph node.
+#
+# mdast wil put an HTML node directly in `root.children` without wrapping in a
+# paragraph node if we write some block element in Markdown:
+#
+#     Markdown:
+#         <div>foo
+#
+#         bar</div>
+#
+#     AST:
+#         root.children = [ { type: "html", value: "<div>foo\nbar</div>" } ]
+#
+# However, we disallow writing block element tag in Markdown and convert such
+# an HTML node into a series of text nodes by using `sanitizeTag()`.
+# To form a paragraph node which have such text nodes as children, we wrap
+# top-level HTML nodes in paragraph nodes before applying `sanitizeTag()`.
+wrapHTMLNodeInParagraph = (root) ->
+  children = []
+  for child in root.children
+    if child.type is 'html'
+      children.push({type: 'paragraph', children: [child]})
+    else
+      children.push(child)
+  root.children = children
+  root
+
+# A subset of [phrasing content] tags, plus RP and RT.
+# We rejected some phrasing content tags from the set because it is able
+# to write a semantically incorrect HTML with them, which leads to a crash of
+# React.
+#
+# Rejected tags are kinds of:
+#
+#     - embedded contents like IFRAME, MATH, AUDIO, and VIDEO, except for IMG;
+#     - interactive contents like BUTTON, KEYGEN, and PROGRESS;
+#
+# [phrasing content]: http://www.w3.org/TR/2011/WD-html5-20110525/content-models.html#phrasing-content-0
+ALLOWED_TAG_NAMES = [
+  'a', 'abbr', 'b', 'br', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'img',
+  'input', 'ins', 'kbd', 'mark', 'ruby', 'rp', 'rt', 'q', 's', 'samp', 'small',
+  'span', 'strong', 'sub', 'sup', 'u', 'wbr',
+]
+
+# Flatten a disallowed kind of folded tag node into a series of nodes.
+#
+# Example:
+#     node.children = [ { type: 'html, subtype: 'folded',
+#                         startTag: startTag, endTag: endTag, children: [child1, child2] }, ... ]
+#     # ^this is flattend into:
+#     node.children = [ startTag, child1, child2, endTag, ... ]
+#
+# startTag and endTag are now freestanding, so they will be rendered as invalid HTML tags.
+sanitizeTag = (node) ->
+  return node unless node.children?
+  children = []
+  for child in node.children
+    if child.subtype is 'folded' and child.tagName not in ALLOWED_TAG_NAMES
+      children.push(child.startTag)
+      Array::push.apply(children, sanitizeTag(child).children)
+      children.push(child.endTag)
+    else
+      children.push(sanitizeTag(child))
+  node.children = children
+  node
 
 module.exports = preprocess
