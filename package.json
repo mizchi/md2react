@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "dompurify": "^0.6.0",
-    "mdast": "^0.24.0",
+    "mdast": "^0.26.2",
     "uuid": "^2.0.1",
     "xmldom": "^0.1.19"
   },
