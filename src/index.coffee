@@ -157,13 +157,15 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
     when 'html'
       if node.subtype is 'computed'
         k = key+'_'+node.tagName
-        props = node.attrs.slice() # make a sharrow copy
+        props = {}
+        for name, value of node.attrs ? {}
+          props[name] = value
         props.key = k
         if node.children?
           $ node.tagName, props, toChildren(node, defs, k)
         else
           $ node.tagName, props
-      if node.subtype is 'folded'
+      else if node.subtype is 'folded'
         k = key+'_'+node.tagName
         props = getPropsFromHTMLNode(node, ATTR_WHITELIST) ? {}
         props.key = k
