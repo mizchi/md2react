@@ -1,5 +1,4 @@
 mdast = require 'mdast'
-uuid = require 'uuid'
 preprocess = require './preprocess'
 
 ATTR_WHITELIST = ['href', 'src', 'target']
