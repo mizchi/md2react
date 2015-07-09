@@ -130,7 +130,7 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
             $ 'a', {key: k+'-p-a', href: "#fnref#{def.footnoteNumber}"}, '↩'
           ]
         $ 'li', {key: k, id: "fn#{def.footnoteNumber}"}, defBody
-      $ 'div', {key, class: 'footnotes'}, [
+      $ 'div', {key, className: 'footnotes'}, [
         $ 'hr', {key: key+'-hr'}
         $ 'ol', {key: key+'-ol'}, items
       ]
