@@ -141,7 +141,7 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
       $ 'thead', {key}, [
         $ 'tr', {key: key+'-_inner-tr'}, node.children.map (cell, i) ->
           k = key+'-th'+i
-          $ 'th', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
+          $ 'th', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, defs, k)
       ]
 
     when 'tableRow'
@@ -149,7 +149,7 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
       $ 'tbody', {key}, [
         $ 'tr', {key: key+'-_inner-td'}, node.children.map (cell, i) ->
           k = key+'-td'+i
-          $ 'td', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, k)
+          $ 'td', {key: k, style: {textAlign: tableAlign[i] ? 'left'}}, toChildren(cell, defs, k)
       ]
     when 'tableCell'   then $ 'span', {key}, toChildren(node, defs, key)
 
