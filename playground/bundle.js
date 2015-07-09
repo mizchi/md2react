@@ -25737,6 +25737,16 @@ compile = function(node, defs, parentKey, tableAlign) {
         key: key
       }, toChildren(node, defs, key));
     case 'html':
+      if (node.subtype === 'computed') {
+        k = key + '_' + node.tagName;
+        props = node.attrs.slice();
+        props.key = k;
+        if (node.children != null) {
+          $(node.tagName, props, toChildren(node, defs, k));
+        } else {
+          $(node.tagName, props);
+        }
+      }
       if (node.subtype === 'folded') {
         k = key + '_' + node.tagName;
         props = (ref1 = getPropsFromHTMLNode(node, ATTR_WHITELIST)) != null ? ref1 : {};
@@ -25801,7 +25811,8 @@ module.exports = function(raw, options) {
 
 
 },{"./preprocess":165,"mdast":2,"uuid":162}],165:[function(require,module,exports){
-var appendFootnoteDefinitionCollection, applyFootnoteNumber, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions;
+var ALLOWED_TAG_NAMES, appendFootnoteDefinitionCollection, applyFootnoteNumber, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions, sanitizeTag, wrapHTMLNodeInParagraph,
+  indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
 preprocess = function(root, options) {
   var defs, mapping;
@@ -25815,6 +25826,8 @@ preprocess = function(root, options) {
   if (options.footnotes) {
     appendFootnoteDefinitionCollection(root, defs);
   }
+  root = wrapHTMLNodeInParagraph(root);
+  root = sanitizeTag(root);
   return [root, defs];
 };
 
@@ -26019,6 +26032,48 @@ isVoidElement = function(elementName) {
   var voidElementNames;
   voidElementNames = ['area', 'base', 'br', 'col', 'command', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr'];
   return voidElementNames.indexOf(elementName) !== -1;
+};
+
+wrapHTMLNodeInParagraph = function(root) {
+  var child, children, i, len1, ref;
+  children = [];
+  ref = root.children;
+  for (i = 0, len1 = ref.length; i < len1; i++) {
+    child = ref[i];
+    if (child.type === 'html') {
+      children.push({
+        type: 'paragraph',
+        children: [child]
+      });
+    } else {
+      children.push(child);
+    }
+  }
+  root.children = children;
+  return root;
+};
+
+ALLOWED_TAG_NAMES = ['a', 'abbr', 'b', 'br', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'img', 'input', 'ins', 'kbd', 'mark', 'ruby', 'rp', 'rt', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'u', 'wbr'];
+
+sanitizeTag = function(node) {
+  var child, children, i, len1, ref, ref1;
+  if (node.children == null) {
+    return node;
+  }
+  children = [];
+  ref = node.children;
+  for (i = 0, len1 = ref.length; i < len1; i++) {
+    child = ref[i];
+    if (child.subtype === 'folded' && (ref1 = child.tagName, indexOf.call(ALLOWED_TAG_NAMES, ref1) < 0)) {
+      children.push(child.startTag);
+      Array.prototype.push.apply(children, sanitizeTag(child).children);
+      children.push(child.endTag);
+    } else {
+      children.push(sanitizeTag(child));
+    }
+  }
+  node.children = children;
+  return node;
 };
 
 module.exports = preprocess;
