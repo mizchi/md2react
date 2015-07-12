@@ -1,4 +1,4 @@
-# md2react
+# md2react [![Circle CI](https://circleci.com/gh/mizchi/md2react/tree/master.svg?style=svg)](https://circleci.com/gh/mizchi/md2react/tree/master)
 
 ```
 npm install --save md2react

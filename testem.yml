@@ -1,0 +1,10 @@
+framework: mocha+chai
+before_tests: npm run build-test
+src_files:
+- test/*.coffee
+serve_files:
+- test/bundle.js
+launch_in_dev:
+- Chrome
+launch_in_ci:
+- Chrome
