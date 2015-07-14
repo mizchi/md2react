@@ -9,7 +9,8 @@
     "mdast"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "build-test": "./node_modules/browserify/bin/cmd.js -t coffeeify --extension='.coffee' test/md2react-test.coffee -o test/bundle.js",
+    "test": "./node_modules/testem/testem.js ci",
     "prepublish": "coffee -o lib -c src/*",
     "build-playground": "browserify -t coffeeify --extension='.coffee' playground/index.coffee -o playground/bundle.js"
   },
@@ -22,8 +23,11 @@
   ],
   "devDependencies": {
     "browserify": "^8.1.3",
+    "chai": "^3.0.0",
     "coffeeify": "^1.0.0",
-    "react": "^0.12.2"
+    "mocha": "^2.2.5",
+    "react": "^0.12.2",
+    "testem": "^0.8.5"
   },
   "dependencies": {
     "dompurify": "^0.6.0",
