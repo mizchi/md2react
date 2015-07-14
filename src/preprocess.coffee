@@ -5,7 +5,7 @@ preprocess = (root, options) ->
 
   # Process footnotes and and links.
   if options.footnotes
-    mapping = defineFootnoteNumber(root)
+    mapping = defineFootnoteNumber(root).mapping
     applyFootnoteNumber(root, mapping)
   defs = removeDefinitions(root)
   if options.footnotes
@@ -19,7 +19,7 @@ preprocess = (root, options) ->
 
 # Sets `footnoteNumber` property to every footnote reference node.
 # Footnote number starts at 1 and is incremented whenever a new footnote
-# identifier appears.
+# identifier appears. Returns `{mapping, maxNumber}`
 #
 # Example (Markdown):
 #
@@ -28,7 +28,6 @@ preprocess = (root, options) ->
 #     use first footnote again[^foo]  # footnoteNumber for [^foo] is 1
 #     yet another footnote[^qux]      # footnoteNumber for [^qux] is 3
 defineFootnoteNumber = (node, num = 1, mapping = {}) ->
-  return {} unless node.children?
   for child in node.children
     if child.type is 'footnoteReference'
       id = child.identifier
@@ -36,8 +35,9 @@ defineFootnoteNumber = (node, num = 1, mapping = {}) ->
         mapping[id] = num
         num += 1
       child.footnoteNumber = mapping[id]
-    defineFootnoteNumber(child, num, mapping)
-  mapping
+    if child.children
+      num = defineFootnoteNumber(child, num, mapping).maxNumber
+  {mapping, maxNumber: num}
 
 # Sets `footnoteNumber` property to every footnote definition node using a
 # given identifier-to-number mapping. `footnoteNumber` of a definition with
