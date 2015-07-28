@@ -3,6 +3,10 @@ preprocess = (root, sourceText, options) ->
   # "raw" HTML node - convert them.
   convertPreToRawHTML(root)
 
+  # Literal `<pre>...</pre>` are often broken up into a series of HTML nodes.
+  # Put them back together into a single "raw" HTML node.
+  convertScatteredPreToRawHTML(root, sourceText)
+
   # Formalize HTML tags.
   root.children = decomposeHTMLNodes(root.children)
   root.children = foldHTMLNodes(root.children)
@@ -100,6 +104,67 @@ convertPreToRawHTML = (root) ->
   for node in root.children
     if node.type is 'html' and /^<pre[ >][^]*<\/pre>$/i.test(node.value)
       node.subtype = 'raw'
+
+convertScatteredPreToRawHTML = (root, sourceText) ->
+  preTexts = []
+  startPreNode = null
+  startParaIndex = null
+  sourceLines = null
+
+  for node, i in root.children
+    isStart = (
+      node.type is 'html' and
+      /^<pre[ >]/i.test(node.value)
+    )
+    if isStart
+      startPreNode = node
+      startParaIndex = i
+
+    paraLastNode = null
+    isEnd = (
+      startPreNode? and
+      node.type is 'html' and
+      /<\/pre>$/i.test(node.value)
+    ) or (
+      startPreNode? and
+      node.type is 'paragraph' and
+      (paraLastNode = node.children[node.children.length - 1]) and
+      paraLastNode.type is 'html' and
+      /<\/pre>$/i.test(paraLastNode.value)
+    )
+    if isEnd
+      endPreNode = paraLastNode ? node
+      sourceLines ?= sourceText.split(/^/m) # split lines _preserving newline character_
+      sliceStart = startIndexFromPosition(startPreNode.position, sourceLines)
+      sliceEnd = endIndexFromPosition(endPreNode.position, sourceLines)
+      rawHTML = sourceText.slice(sliceStart, sliceEnd)
+      preTexts.push
+        startParaIndex: startParaIndex
+        paraCount: i - startParaIndex + 1
+        rawHTML: rawHTML
+      startPreNode = null
+      startParaIndex = null
+
+  offset = 0
+  for pre in preTexts
+    rawHTMLNode = {type: 'html', subtype: 'raw', value: pre.rawHTML}
+    start = pre.startParaIndex - offset
+    root.children.splice(start, pre.paraCount, rawHTMLNode)
+    offset = pre.paraCount - 1
+
+startIndexFromPosition = (pos, lines) ->
+  index = 0
+  for i in [0...(pos.start.line - 1)]
+    index += lines[i].length
+  index += pos.start.column - 1
+  index
+
+endIndexFromPosition = (pos, lines) ->
+  index = 0
+  for i in [0...(pos.end.line - 1)]
+    index += lines[i].length
+  index += pos.end.column - 1
+  index
 
 # Returns nodes by converting each occurrence of a series of nodes enclosed by
 # a "start" and an "end" HTML node into one "folded" HTML node. A folded node
