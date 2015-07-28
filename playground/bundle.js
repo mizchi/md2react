@@ -405,6 +405,7 @@ module.exports = {
         'fences': false,
         'fence': '`',
         'bullet': '-',
+        'listItemIndent': 'tab',
         'rule': '*',
         'ruleSpaces': true,
         'ruleRepetition': 3,
@@ -428,13 +429,13 @@ module.exports = {
     'item': /([ \t]*)((?:[*+-]|\d+\.))( {1,4}(?! )| |\t)[^\n]*(?:\n(?!\1(?:[*+-]|\d+\.)[ \t])[^\n]*)*/gm,
     'list': /^([ \t]*)((?:[*+-]|\d+\.))[ \t][\s\S]+?(?:(?=\n+\1?(?:[-*_][ \t]*){3,}(?:\n|$))|(?=\n+[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))|\n{2,}(?![ \t])(?!\1(?:[*+-]|\d+\.)[ \t])|$)/,
     'blockquote': /^(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?/,
-    'html': /^[ \t]*(?:<!--[\s\S]*?-->[ \t]*(?:\n|\s*$)|<((?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b)[\s\S]+?<\/\1>[ \t]*(?:\n{2,}|\s*$)|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b(?:"[^"]*"|'[^']*'|[^'">])*?>[ \t]*(?:\n{2,}|\s*$))/i,
+    'html': /^(?:[ \t]*(?:(?:(?:<(?:article|header|aside|hgroup|blockquote|hr|iframe|body|li|map|button|object|canvas|ol|caption|output|col|p|colgroup|pre|dd|progress|div|section|dl|table|td|dt|tbody|embed|textarea|fieldset|tfoot|figcaption|th|figure|thead|footer|tr|form|ul|h1|h2|h3|h4|h5|h6|video|script|style)(?:(?:\s+)(?:[a-zA-Z_:][a-zA-Z0-9_.:-]*)(?:(?:\s+)?=(?:\s+)?(?:[^"'=<>`]+|'[^']*'|"[^"]*"))?)*(?:\s+)?\/?>?)|(?:<\/(?:article|header|aside|hgroup|blockquote|hr|iframe|body|li|map|button|object|canvas|ol|caption|output|col|p|colgroup|pre|dd|progress|div|section|dl|table|td|dt|tbody|embed|textarea|fieldset|tfoot|figcaption|th|figure|thead|footer|tr|form|ul|h1|h2|h3|h4|h5|h6|video|script|style)(?:\s+)?>))|(?:<!--(?!-?>)(?:[^-]|-(?!-))*-->)|(?:<\?(?:[^\?]|\?(?!>))+\?>)|(?:<![a-zA-Z]+\s+[\s\S]+?>)|(?:<!\[CDATA\[[\s\S]+?\]\]>))[\s\S]*?[ \t]*?(?:\n{2,}|\s*$))/i,
     'paragraph': /^(?:(?:[^\n]+\n?(?![ \t]*([-*_])( *\1){2,} *(?=\n|$)|([ \t]*)(#{1,6})(?:([ \t]+)([^\n]+?))??(?:[ \t]+#+)?[ \t]*(?=\n|$)|(\ {0,3})([^\n]+?)[ \t]*\n\ {0,3}(=|-){1,}[ \t]*(?=\n|$)|[ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$)|(?=[ \t]*>)(?:(?:(?:[ \t]*>[^\n]*\n)*(?:[ \t]*>[^\n]+(?=\n|$))|(?![ \t]*>)(?![ \t]*\[((?:[^\\](?:\\|\\(?:\\{2})+)\]|[^\]])+)\]:[ \t\n]*(<[^>\[\]]+>|[^\s\[\]]+)(?:[ \t\n]+['"(]((?:[^\n]|\n(?!\n))*?)['")])?[ \t]*(?=\n|$))[^\n]+)(?:\n|$))*(?:[ \t]*>[ \t]*(?:\n[ \t]*>[ \t]*)*)?|<(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\b)(?!mailto:)\w+(?!:\/|[^\w\s@]*@)\b))+)/,
     'escape': /^\\([\\`*{}\[\]()#+\-.!_>])/,
     'autoLink': /^<([^ >]+(@|:\/)[^ >]+)>/,
-    'tag': /^<!--[\s\S]*?-->|^<\/?\w+(?:"[^"]*"|'[^']*'|[^'">])*?>/,
-    'strong': /^(_)_([\s\S]+?)__(?!_)|^(\*)\*([\s\S]+?)\*\*(?!\*)/,
-    'emphasis': /^\b(_)((?:__|[\s\S])+?)_\b|^(\*)((?:\*\*|[\s\S])+?)\*(?!\*)/,
+    'tag': /^(?:(?:<(?:[a-zA-Z][a-zA-Z0-9]*)(?:(?:\s+)(?:[a-zA-Z_:][a-zA-Z0-9_.:-]*)(?:(?:\s+)?=(?:\s+)?(?:[^"'=<>`]+|'[^']*'|"[^"]*"))?)*(?:\s+)?\/?>)|(?:<\/(?:[a-zA-Z][a-zA-Z0-9]*)(?:\s+)?>)|(?:<!--(?!-?>)(?:[^-]|-(?!-))*-->)|(?:<\?(?:[^\?]|\?(?!>))+\?>)|(?:<![a-zA-Z]+\s+[\s\S]+?>)|(?:<!\[CDATA\[[\s\S]+?\]\]>))/,
+    'strong': /^(_)_((?:\\[\s\S]|[^\\])+?)__(?!_)|^(\*)\*((?:\\[\s\S]|[^\\])+?)\*\*(?!\*)/,
+    'emphasis': /^\b(_)((?:__|\\[\s\S]|[^\\])+?)_\b|^(\*)((?:\*\*|\\[\s\S]|[^\\])+?)\*(?!\*)/,
     'inlineCode': /^(`+)((?!`)[\s\S]*?(?:`\s+|[^`]))?(\1)(?!`)/,
     'break': /^ {2,}\n(?!\s*$)/,
     'inlineText': /^[\s\S]+?(?=[\\<!\[_*`]| {2,}\n|$)/,
@@ -1024,9 +1025,9 @@ var EXPRESSION_RIGHT_ALIGNMENT = /^[ \t]*-+:[ \t]*$/;
 var EXPRESSION_CENTER_ALIGNMENT = /^[ \t]*:-+:[ \t]*$/;
 var EXPRESSION_LEFT_ALIGNMENT = /^[ \t]*:-+[ \t]*$/;
 var EXPRESSION_TABLE_FENCE = /^[ \t]*|\|[ \t]*$/g;
-var EXPRESSION_TABLE_INITIAL = /^[ \t]*\|[ \t]*/g;
+var EXPRESSION_TABLE_INITIAL = /^[ \t]*\|/g;
 var EXPRESSION_TABLE_CONTENT =
-    /((?:\\[\s\S]|[^\|])+?)([ \t]?\|[ \t]?\n?|\n?$)/g;
+    /[ \t]*?((?:\\[\s\S]|[^\|])+?)([ \t]?\|[ \t]?\n?|\n?$)/g;
 var EXPRESSION_TABLE_BORDER = /[ \t]*\|[ \t]*/;
 var EXPRESSION_BLOCK_QUOTE = /^[ \t]*>[ \t]?/gm;
 var EXPRESSION_BULLET = /^([ \t]*)([*+-]|\d+[.)])( {1,4}(?! )| |\t)([^\n]*)/;
@@ -1802,7 +1803,6 @@ tokenizeFootnoteDefinition.notInBlockquote = true;
  */
 function tokenizeTable(eat, $0, $1, $2, $3, $4, $5) {
     var self = this;
-    var now;
     var node;
     var index;
     var length;
@@ -1845,10 +1845,16 @@ function tokenizeTable(eat, $0, $1, $2, $3, $4, $5) {
          * @return {string} - Empty string.
          */
         function eatCell(value, content, pipe) {
+            var cell = utilities.trimLeft(content);
+            var diff = content.length - cell.length;
+            var now;
+
+            eat(content.slice(0, diff));
+
             now = eat.now();
 
-            eat(content)(self.renderInline(
-                TABLE_CELL, content.trim(), now
+            eat(cell)(self.renderInline(
+                TABLE_CELL, utilities.trimRight(cell), now
             ), row);
 
             eat(pipe);
@@ -2537,14 +2543,14 @@ function tokenizeLink(eat, $0, $1, $2, $3, $4, $5, $6, $7) {
  *   tokenizeReference(eat, '[foo][]', '[', 'foo', '');
  *   tokenizeReference(eat, '[foo][bar]', '[', 'foo', 'bar');
  *
- * @property {boolean} notInLink
  * @param {function(string)} eat
  * @param {string} $0 - Whole link.
  * @param {string} $1 - Prefix.
  * @param {string} $2 - identifier.
  * @param {string} $3 - Content.
- * @return {Node} - `linkReference`, `imageReference`, or
- *   `footnoteReference`.
+ * @return {Node?} - `linkReference`, `imageReference`, or
+ *   `footnoteReference`.  Returns null when this is a link
+ *   reference, but we're already in a link.
  */
 function tokenizeReference(eat, $0, $1, $2, $3) {
     var self = this;
@@ -2581,6 +2587,10 @@ function tokenizeReference(eat, $0, $1, $2, $3) {
         }
     }
 
+    if (self.inLink && type === 'link') {
+        return null;
+    }
+
     now.column += $1.length;
 
     node = {
@@ -2602,8 +2612,6 @@ function tokenizeReference(eat, $0, $1, $2, $3) {
 
     return eat($0)(node);
 }
-
-tokenizeReference.notInLink = true;
 
 /**
  * Tokenise strong emphasis.
@@ -3589,7 +3597,6 @@ var objectCreate = utilities.create;
  * Constants.
  */
 
-var HALF = 2;
 var INDENT = 4;
 var MINIMUM_CODE_FENCE_LENGTH = 3;
 var YAML_FENCE_LENGTH = 3;
@@ -3704,6 +3711,20 @@ var ORDERED_MAP = objectCreate();
 
 ORDERED_MAP.true = 'visitOrderedItems';
 ORDERED_MAP.false = 'visitUnorderedItems';
+
+/*
+ * Allowed list-item-indent's.
+ */
+
+var LIST_ITEM_INDENTS = objectCreate();
+
+var LIST_ITEM_TAB = 'tab';
+var LIST_ITEM_ONE = '1';
+var LIST_ITEM_MIXED = 'mixed';
+
+LIST_ITEM_INDENTS[LIST_ITEM_ONE] = true;
+LIST_ITEM_INDENTS[LIST_ITEM_TAB] = true;
+LIST_ITEM_INDENTS[LIST_ITEM_MIXED] = true;
 
 /*
  * Which checkbox to use.
@@ -3977,6 +3998,7 @@ var maps = {
     'entities': ENTITY_OPTIONS,
     'bullet': LIST_BULLETS,
     'rule': HORIZONTAL_RULE_BULLETS,
+    'listItemIndent': LIST_ITEM_INDENTS,
     'emphasis': EMPHASIS_MARKERS,
     'strong': EMPHASIS_MARKERS,
     'fence': FENCE_MARKERS
@@ -4145,24 +4167,10 @@ compilerPrototype.visitOrderedItems = function (token) {
     var length = tokens.length;
     var start = token.start;
     var bullet;
-    var indent;
-    var spacing;
-    var value;
 
     while (++index < length) {
-        bullet = (increment ? start + index : start) + DOT + SPACE;
-
-        indent = Math.ceil(bullet.length / INDENT) * INDENT;
-        spacing = repeat(SPACE, indent - bullet.length);
-
-        value = bullet + spacing +
-            self.listItem(tokens[index], token, indent);
-
-        if (tokens[index].loose && index !== length - 1) {
-            value += LINE;
-        }
-
-        values[index] = value;
+        bullet = (increment ? start + index : start) + DOT;
+        values[index] = self.listItem(tokens[index], token, index, bullet);
     }
 
     return values.join(LINE);
@@ -4200,29 +4208,12 @@ compilerPrototype.visitUnorderedItems = function (token) {
     var self = this;
     var values = [];
     var tokens = token.children;
-    var index = -1;
     var length = tokens.length;
-    var bullet;
-    var spacing;
-    var value;
-
-    /*
-     * Unordered bullets are always one character, so
-     * the following can be hard coded.
-     */
-
-    bullet = self.options.bullet + SPACE;
-    spacing = repeat(SPACE, HALF);
+    var index = -1;
+    var bullet = self.options.bullet;
 
     while (++index < length) {
-        value = bullet + spacing +
-            self.listItem(tokens[index], token, INDENT);
-
-        if (tokens[index].loose && index !== length - 1) {
-            value += LINE;
-        }
-
-        values[index] = value;
+        values[index] = self.listItem(tokens[index], token, index, bullet);
     }
 
     return values.join(LINE);
@@ -4537,33 +4528,63 @@ compilerPrototype.list = function (token) {
  *       type: 'text',
  *       value: 'bar'
  *     }]
- *   }, null, null, 4);
- *   '[x] bar'
+ *   }, {
+ *     type: 'list',
+ *     ordered: false,
+ *     children: [{
+ *       type: 'listItem',
+ *       checked: true,
+ *       children: [{
+ *         type: 'text',
+ *         value: 'bar'
+ *       }]
+ *     }]
+ *   }, 0, '*');
+ *   '-   [x] bar'
  *
  * @param {Object} token - `listItem` node.
- * @param {Object} parent - Parent of `token`.
- * @param {number} padding - Indentation to use on
- *   subsequent lines.
- * @return {string} - Markdown list item (without bullet).
+ * @param {Object} parent - `list` node.
+ * @param {number} position - Index of `token` in `parent`.
+ * @param {string} bullet - Bullet to use.  This, and the
+ *   `listItemIndent` setting define the used indent.
+ * @return {string} - Markdown list item.
  */
-compilerPrototype.listItem = function (token, parent, padding) {
+compilerPrototype.listItem = function (token, parent, position, bullet) {
     var self = this;
+    var style = self.options.listItemIndent;
     var tokens = token.children;
     var values = [];
     var index = -1;
     var length = tokens.length;
+    var loose = token.loose;
     var value;
+    var indent;
+    var spacing;
 
     while (++index < length) {
         values[index] = self.visit(tokens[index], token);
     }
 
-    value = CHECKBOX_MAP[token.checked] +
-        values.join(token.loose ? BREAK : LINE);
+    value = CHECKBOX_MAP[token.checked] + values.join(loose ? BREAK : LINE);
 
-    value = pad(value, padding / INDENT);
+    if (
+        style === LIST_ITEM_ONE ||
+        (style === LIST_ITEM_MIXED && value.indexOf(LINE) === -1)
+    ) {
+        indent = bullet.length + 1;
+        spacing = SPACE;
+    } else {
+        indent = Math.ceil((bullet.length + 1) / INDENT) * INDENT;
+        spacing = repeat(SPACE, indent - bullet.length);
+    }
 
-    return value.slice(padding);
+    value = bullet + spacing + pad(value, indent / INDENT).slice(indent);
+
+    if (loose && parent.children.length - 1 !== position) {
+        value += LINE;
+    }
+
+    return value;
 };
 
 /**
@@ -25628,12 +25649,13 @@ module.exports = function(raw, options) {
 
 
 },{"./preprocess":163,"mdast":2}],163:[function(require,module,exports){
-var ALLOWED_TAG_NAMES, appendFootnoteDefinitionCollection, applyFootnoteNumber, convertPreToRawHTML, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions, sanitizeTag, wrapHTMLNodeInParagraph,
+var ALLOWED_TAG_NAMES, appendFootnoteDefinitionCollection, applyFootnoteNumber, convertPreToRawHTML, convertScatteredPreToRawHTML, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, endIndexFromPosition, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions, sanitizeTag, startIndexFromPosition, wrapHTMLNodeInParagraph,
   indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
 preprocess = function(root, sourceText, options) {
   var defs, mapping;
   convertPreToRawHTML(root);
+  convertScatteredPreToRawHTML(root, sourceText);
   root.children = decomposeHTMLNodes(root.children);
   root.children = foldHTMLNodes(root.children);
   if (options.footnotes) {
@@ -25650,7 +25672,7 @@ preprocess = function(root, sourceText, options) {
 };
 
 defineFootnoteNumber = function(node, num, mapping) {
-  var child, i, id, len1, ref;
+  var child, id, j, len1, ref;
   if (num == null) {
     num = 1;
   }
@@ -25658,8 +25680,8 @@ defineFootnoteNumber = function(node, num, mapping) {
     mapping = {};
   }
   ref = node.children;
-  for (i = 0, len1 = ref.length; i < len1; i++) {
-    child = ref[i];
+  for (j = 0, len1 = ref.length; j < len1; j++) {
+    child = ref[j];
     if (child.type === 'footnoteReference') {
       id = child.identifier;
       if (mapping[id] == null) {
@@ -25679,14 +25701,14 @@ defineFootnoteNumber = function(node, num, mapping) {
 };
 
 applyFootnoteNumber = function(node, mapping) {
-  var child, i, id, isFootnoteDefLike, len1, ref, results;
+  var child, id, isFootnoteDefLike, j, len1, ref, results;
   if (node.children == null) {
     return;
   }
   ref = node.children;
   results = [];
-  for (i = 0, len1 = ref.length; i < len1; i++) {
-    child = ref[i];
+  for (j = 0, len1 = ref.length; j < len1; j++) {
+    child = ref[j];
     isFootnoteDefLike = child.type === 'definition' && /^[^]/.test(child.identifier);
     if (child.type === 'footnoteDefinition' || isFootnoteDefLike) {
       id = isFootnoteDefLike ? child.identifier.slice(1) : child.identifier;
@@ -25700,10 +25722,10 @@ applyFootnoteNumber = function(node, mapping) {
 appendFootnoteDefinitionCollection = function(node, defs) {
   var def, footnoteDefs;
   footnoteDefs = (function() {
-    var i, len1, results;
+    var j, len1, results;
     results = [];
-    for (i = 0, len1 = defs.length; i < len1; i++) {
-      def = defs[i];
+    for (j = 0, len1 = defs.length; j < len1; j++) {
+      def = defs[j];
       if ((def.footnoteNumber != null) && def.footnoteNumber > 0) {
         results.push(def);
       }
@@ -25722,15 +25744,15 @@ appendFootnoteDefinitionCollection = function(node, defs) {
 };
 
 removeDefinitions = function(node) {
-  var child, childDefs, children, defs, i, len1, ref, ref1;
+  var child, childDefs, children, defs, j, len1, ref, ref1;
   if (node.children == null) {
     return [];
   }
   children = [];
   defs = [];
   ref = node.children;
-  for (i = 0, len1 = ref.length; i < len1; i++) {
-    child = ref[i];
+  for (j = 0, len1 = ref.length; j < len1; j++) {
+    child = ref[j];
     if ((ref1 = child.type) === 'definition' || ref1 === 'footnoteDefinition') {
       defs.push(child);
     } else {
@@ -25744,11 +25766,11 @@ removeDefinitions = function(node) {
 };
 
 convertPreToRawHTML = function(root) {
-  var i, len1, node, ref, results;
+  var j, len1, node, ref, results;
   ref = root.children;
   results = [];
-  for (i = 0, len1 = ref.length; i < len1; i++) {
-    node = ref[i];
+  for (j = 0, len1 = ref.length; j < len1; j++) {
+    node = ref[j];
     if (node.type === 'html' && /^<pre[ >][^]*<\/pre>$/i.test(node.value)) {
       results.push(node.subtype = 'raw');
     } else {
@@ -25758,14 +25780,83 @@ convertPreToRawHTML = function(root) {
   return results;
 };
 
+convertScatteredPreToRawHTML = function(root, sourceText) {
+  var endPreNode, i, isEnd, isStart, j, k, len1, len2, node, offset, paraLastNode, pre, preTexts, rawHTML, rawHTMLNode, ref, results, sliceEnd, sliceStart, sourceLines, start, startParaIndex, startPreNode;
+  preTexts = [];
+  startPreNode = null;
+  startParaIndex = null;
+  sourceLines = null;
+  ref = root.children;
+  for (i = j = 0, len1 = ref.length; j < len1; i = ++j) {
+    node = ref[i];
+    isStart = node.type === 'html' && /^<pre[ >]/i.test(node.value);
+    if (isStart) {
+      startPreNode = node;
+      startParaIndex = i;
+    }
+    paraLastNode = null;
+    isEnd = ((startPreNode != null) && node.type === 'html' && /<\/pre>$/i.test(node.value)) || ((startPreNode != null) && node.type === 'paragraph' && (paraLastNode = node.children[node.children.length - 1]) && paraLastNode.type === 'html' && /<\/pre>$/i.test(paraLastNode.value));
+    if (isEnd) {
+      endPreNode = paraLastNode != null ? paraLastNode : node;
+      if (sourceLines == null) {
+        sourceLines = sourceText.split(/^/m);
+      }
+      sliceStart = startIndexFromPosition(startPreNode.position, sourceLines);
+      sliceEnd = endIndexFromPosition(endPreNode.position, sourceLines);
+      rawHTML = sourceText.slice(sliceStart, sliceEnd);
+      preTexts.push({
+        startParaIndex: startParaIndex,
+        paraCount: i - startParaIndex + 1,
+        rawHTML: rawHTML
+      });
+      startPreNode = null;
+      startParaIndex = null;
+    }
+  }
+  offset = 0;
+  results = [];
+  for (k = 0, len2 = preTexts.length; k < len2; k++) {
+    pre = preTexts[k];
+    rawHTMLNode = {
+      type: 'html',
+      subtype: 'raw',
+      value: pre.rawHTML
+    };
+    start = pre.startParaIndex - offset;
+    root.children.splice(start, pre.paraCount, rawHTMLNode);
+    results.push(offset = pre.paraCount - 1);
+  }
+  return results;
+};
+
+startIndexFromPosition = function(pos, lines) {
+  var i, index, j, ref;
+  index = 0;
+  for (i = j = 0, ref = pos.start.line - 1; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
+    index += lines[i].length;
+  }
+  index += pos.start.column - 1;
+  return index;
+};
+
+endIndexFromPosition = function(pos, lines) {
+  var i, index, j, ref;
+  index = 0;
+  for (i = j = 0, ref = pos.end.line - 1; 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
+    index += lines[i].length;
+  }
+  index += pos.end.column - 1;
+  return index;
+};
+
 foldHTMLNodes = function(nodes) {
-  var children, folded, i, index, j, len1, len2, node, pNode, processedNodes, startTag, startTagIndex;
+  var children, folded, index, j, k, len1, len2, node, pNode, processedNodes, startTag, startTagIndex;
   processedNodes = [];
-  for (i = 0, len1 = nodes.length; i < len1; i++) {
-    node = nodes[i];
+  for (j = 0, len1 = nodes.length; j < len1; j++) {
+    node = nodes[j];
     if (node.subtype === 'end') {
       startTagIndex = null;
-      for (index = j = 0, len2 = processedNodes.length; j < len2; index = ++j) {
+      for (index = k = 0, len2 = processedNodes.length; k < len2; index = ++k) {
         pNode = processedNodes[index];
         if (pNode.subtype === 'start' && pNode.tagName === node.tagName) {
           startTagIndex = index;
@@ -25797,10 +25888,10 @@ foldHTMLNodes = function(nodes) {
 };
 
 decomposeHTMLNodes = function(nodes) {
-  var fragmentNodes, i, len1, node, processedNodes;
+  var fragmentNodes, j, len1, node, processedNodes;
   processedNodes = [];
-  for (i = 0, len1 = nodes.length; i < len1; i++) {
-    node = nodes[i];
+  for (j = 0, len1 = nodes.length; j < len1; j++) {
+    node = nodes[j];
     if (node.type === 'html' && node.subtype === 'raw') {
       processedNodes.push(node);
     } else if (node.type === 'html') {
@@ -25848,14 +25939,14 @@ decomposeHTMLString = function(str) {
 };
 
 createNodeFromHTMLFragment = function(str) {
-  var i, name, ref, ref1, slash, subtype;
+  var j, name, ref, ref1, slash, subtype;
   if (/^[^<]/.test(str)) {
     return {
       type: 'text',
       value: str
     };
   }
-  ref1 = (ref = /^<(\/?)([0-9A-Z]+)/i.exec(str)) != null ? ref : [], i = ref1.length - 2, slash = ref1[i++], name = ref1[i++];
+  ref1 = (ref = /^<(\/?)([0-9A-Z]+)/i.exec(str)) != null ? ref : [], j = ref1.length - 2, slash = ref1[j++], name = ref1[j++];
   subtype = name == null ? 'special' : slash === '/' ? 'end' : isVoidElement(name) ? 'void' : 'start';
   return {
     type: 'html',
@@ -25872,11 +25963,11 @@ isVoidElement = function(elementName) {
 };
 
 wrapHTMLNodeInParagraph = function(root) {
-  var child, children, i, len1, ref;
+  var child, children, j, len1, ref;
   children = [];
   ref = root.children;
-  for (i = 0, len1 = ref.length; i < len1; i++) {
-    child = ref[i];
+  for (j = 0, len1 = ref.length; j < len1; j++) {
+    child = ref[j];
     if (child.type === 'html') {
       children.push({
         type: 'paragraph',
@@ -25893,14 +25984,14 @@ wrapHTMLNodeInParagraph = function(root) {
 ALLOWED_TAG_NAMES = ['a', 'abbr', 'b', 'br', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'img', 'input', 'ins', 'kbd', 'mark', 'ruby', 'rp', 'rt', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'u', 'wbr'];
 
 sanitizeTag = function(node) {
-  var child, children, i, len1, ref, ref1;
+  var child, children, j, len1, ref, ref1;
   if (node.children == null) {
     return node;
   }
   children = [];
   ref = node.children;
-  for (i = 0, len1 = ref.length; i < len1; i++) {
-    child = ref[i];
+  for (j = 0, len1 = ref.length; j < len1; j++) {
+    child = ref[j];
     if (child.subtype === 'folded' && (ref1 = child.tagName, indexOf.call(ALLOWED_TAG_NAMES, ref1) < 0)) {
       children.push(child.startTag);
       Array.prototype.push.apply(children, sanitizeTag(child).children);
