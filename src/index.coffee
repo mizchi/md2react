@@ -5,6 +5,26 @@ ATTR_WHITELIST = ['href', 'src', 'target']
 
 $ = React.createElement
 
+defaultHTMLWrapperComponent = React.createClass
+  _update: ->
+    current = @props.html
+    if @_lastHtml isnt current
+      @_lastHtml = current
+      node = @refs.htmlWrapper.getDOMNode()
+      node.contentDocument.body.innerHTML = @props.html
+      node.style.height = node.contentWindow.document.body.scrollHeight + 'px'
+      node.style.width  = node.contentWindow.document.body.scrollWidth  + 'px'
+
+  componentDidUpdate: -> @_update()
+  componentDidMount: -> @_update()
+
+  render: ->
+    $ 'iframe',
+      ref: 'htmlWrapper'
+      html: @props.html
+      style:
+        border: 'none'
+
 toChildren = (node, defs, parentKey, tableAlign = []) ->
   return (for child, i in node.children
     compile(child, defs, parentKey+'_'+i, tableAlign))
@@ -154,7 +174,9 @@ compile = (node, defs, parentKey='_start', tableAlign = null) ->
 
     # Raw html
     when 'html'
-      if node.subtype is 'computed'
+      if node.subtype is 'raw'
+        $ htmlWrapperComponent, key: key, html: node.value
+      else if node.subtype is 'computed'
         k = key+'_'+node.tagName
         props = {}
         for name, value of node.attrs ? {}
@@ -197,6 +219,7 @@ rawValueWrapper = null
 
 module.exports = (raw, options = {}) ->
   sanitize = options.sanitize ? true
+  htmlWrapperComponent = options.htmlWrapperComponent ? defaultHTMLWrapperComponent
   rawValueWrapper = options.rawValueWrapper ? (text) -> text
 
   highlight = options.highlight ? (code, lang, key) ->
@@ -204,6 +227,6 @@ module.exports = (raw, options = {}) ->
       $ 'code', {key: key+'-_inner-code'}, code
     ]
   ast = mdast.parse raw, options
-  [ast, defs] = preprocess(ast, options)
+  [ast, defs] = preprocess(ast, raw, options)
   ast = options.preprocessAST?(ast) ? ast
   compile(ast, defs)

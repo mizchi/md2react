@@ -25242,7 +25242,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"../src/index":162,"react":160}],162:[function(require,module,exports){
-var $, ATTR_WHITELIST, compile, getPropsFromHTMLNode, highlight, htmlWrapperComponent, isValidDocument, mdast, preprocess, rawValueWrapper, sanitize, toChildren,
+var $, ATTR_WHITELIST, compile, defaultHTMLWrapperComponent, getPropsFromHTMLNode, highlight, htmlWrapperComponent, isValidDocument, mdast, preprocess, rawValueWrapper, sanitize, toChildren,
   indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
 mdast = require('mdast');
@@ -25252,6 +25252,35 @@ preprocess = require('./preprocess');
 ATTR_WHITELIST = ['href', 'src', 'target'];
 
 $ = React.createElement;
+
+defaultHTMLWrapperComponent = React.createClass({
+  _update: function() {
+    var current, node;
+    current = this.props.html;
+    if (this._lastHtml !== current) {
+      this._lastHtml = current;
+      node = this.refs.htmlWrapper.getDOMNode();
+      node.contentDocument.body.innerHTML = this.props.html;
+      node.style.height = node.contentWindow.document.body.scrollHeight + 'px';
+      return node.style.width = node.contentWindow.document.body.scrollWidth + 'px';
+    }
+  },
+  componentDidUpdate: function() {
+    return this._update();
+  },
+  componentDidMount: function() {
+    return this._update();
+  },
+  render: function() {
+    return $('iframe', {
+      ref: 'htmlWrapper',
+      html: this.props.html,
+      style: {
+        border: 'none'
+      }
+    });
+  }
+});
 
 toChildren = function(node, defs, parentKey, tableAlign) {
   var child, i;
@@ -25515,7 +25544,12 @@ compile = function(node, defs, parentKey, tableAlign) {
         key: key
       }, toChildren(node, defs, key));
     case 'html':
-      if (node.subtype === 'computed') {
+      if (node.subtype === 'raw') {
+        return $(htmlWrapperComponent, {
+          key: key,
+          html: node.value
+        });
+      } else if (node.subtype === 'computed') {
         k = key + '_' + node.tagName;
         props = {};
         ref2 = (ref1 = node.attrs) != null ? ref1 : {};
@@ -25566,15 +25600,16 @@ htmlWrapperComponent = null;
 rawValueWrapper = null;
 
 module.exports = function(raw, options) {
-  var ast, defs, ref, ref1, ref2, ref3, ref4;
+  var ast, defs, ref, ref1, ref2, ref3, ref4, ref5;
   if (options == null) {
     options = {};
   }
   sanitize = (ref = options.sanitize) != null ? ref : true;
-  rawValueWrapper = (ref1 = options.rawValueWrapper) != null ? ref1 : function(text) {
+  htmlWrapperComponent = (ref1 = options.htmlWrapperComponent) != null ? ref1 : defaultHTMLWrapperComponent;
+  rawValueWrapper = (ref2 = options.rawValueWrapper) != null ? ref2 : function(text) {
     return text;
   };
-  highlight = (ref2 = options.highlight) != null ? ref2 : function(code, lang, key) {
+  highlight = (ref3 = options.highlight) != null ? ref3 : function(code, lang, key) {
     return $('pre', {
       key: key,
       className: 'code'
@@ -25585,19 +25620,20 @@ module.exports = function(raw, options) {
     ]);
   };
   ast = mdast.parse(raw, options);
-  ref3 = preprocess(ast, options), ast = ref3[0], defs = ref3[1];
-  ast = (ref4 = typeof options.preprocessAST === "function" ? options.preprocessAST(ast) : void 0) != null ? ref4 : ast;
+  ref4 = preprocess(ast, raw, options), ast = ref4[0], defs = ref4[1];
+  ast = (ref5 = typeof options.preprocessAST === "function" ? options.preprocessAST(ast) : void 0) != null ? ref5 : ast;
   return compile(ast, defs);
 };
 
 
 
 },{"./preprocess":163,"mdast":2}],163:[function(require,module,exports){
-var ALLOWED_TAG_NAMES, appendFootnoteDefinitionCollection, applyFootnoteNumber, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions, sanitizeTag, wrapHTMLNodeInParagraph,
+var ALLOWED_TAG_NAMES, appendFootnoteDefinitionCollection, applyFootnoteNumber, convertPreToRawHTML, createNodeFromHTMLFragment, decomposeHTMLNode, decomposeHTMLNodes, decomposeHTMLString, defineFootnoteNumber, foldHTMLNodes, isVoidElement, preprocess, removeDefinitions, sanitizeTag, wrapHTMLNodeInParagraph,
   indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
-preprocess = function(root, options) {
+preprocess = function(root, sourceText, options) {
   var defs, mapping;
+  convertPreToRawHTML(root);
   root.children = decomposeHTMLNodes(root.children);
   root.children = foldHTMLNodes(root.children);
   if (options.footnotes) {
@@ -25707,6 +25743,21 @@ removeDefinitions = function(node) {
   return defs;
 };
 
+convertPreToRawHTML = function(root) {
+  var i, len1, node, ref, results;
+  ref = root.children;
+  results = [];
+  for (i = 0, len1 = ref.length; i < len1; i++) {
+    node = ref[i];
+    if (node.type === 'html' && /^<pre[ >][^]*<\/pre>$/i.test(node.value)) {
+      results.push(node.subtype = 'raw');
+    } else {
+      results.push(void 0);
+    }
+  }
+  return results;
+};
+
 foldHTMLNodes = function(nodes) {
   var children, folded, i, index, j, len1, len2, node, pNode, processedNodes, startTag, startTagIndex;
   processedNodes = [];
@@ -25750,10 +25801,12 @@ decomposeHTMLNodes = function(nodes) {
   processedNodes = [];
   for (i = 0, len1 = nodes.length; i < len1; i++) {
     node = nodes[i];
-    if (node.type === 'html') {
+    if (node.type === 'html' && node.subtype === 'raw') {
+      processedNodes.push(node);
+    } else if (node.type === 'html') {
       fragmentNodes = decomposeHTMLNode(node);
       if (fragmentNodes != null) {
-        Array.prototype.push.apply(processedNodes, fragmentNodes);
+        processedNodes.push.apply(processedNodes, fragmentNodes);
       } else {
         node.subtype = 'malformed';
         processedNodes.push(node);

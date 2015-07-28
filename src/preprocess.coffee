@@ -1,4 +1,8 @@
-preprocess = (root, options) ->
+preprocess = (root, sourceText, options) ->
+  # Some yet-to-be-preprocessed HTML nodes are directly convertible to
+  # "raw" HTML node - convert them.
+  convertPreToRawHTML(root)
+
   # Formalize HTML tags.
   root.children = decomposeHTMLNodes(root.children)
   root.children = foldHTMLNodes(root.children)
@@ -92,6 +96,11 @@ removeDefinitions = (node) ->
   node.children = children
   defs
 
+convertPreToRawHTML = (root) ->
+  for node in root.children
+    if node.type is 'html' and /^<pre[ >][^]*<\/pre>$/i.test(node.value)
+      node.subtype = 'raw'
+
 # Returns nodes by converting each occurrence of a series of nodes enclosed by
 # a "start" and an "end" HTML node into one "folded" HTML node. A folded node
 # has `folded` subtype and two additional properties, `startTag` and `endTag`.
@@ -128,10 +137,12 @@ foldHTMLNodes = (nodes) ->
 decomposeHTMLNodes = (nodes) ->
   processedNodes = []
   for node in nodes
-    if node.type is 'html'
+    if node.type is 'html' and node.subtype is 'raw'
+      processedNodes.push(node)
+    else if node.type is 'html'
       fragmentNodes = decomposeHTMLNode(node)
       if fragmentNodes?
-        Array.prototype.push.apply(processedNodes, fragmentNodes)
+        processedNodes.push(fragmentNodes...)
       else
         node.subtype = 'malformed'
         processedNodes.push(node)
