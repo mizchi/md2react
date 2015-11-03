@@ -2,7 +2,7 @@ should = chai.should()
 global.React = require 'react'
 md2react = require '../src/index'
 
-options = gfm: true, breaks: true, tasklist: true
+options = gfm: true, breaks: true, tasklist: true, footnotes: true
 
 describe 'text', ->
 
@@ -209,6 +209,24 @@ describe 'linkReference', ->
     [example]: http://example.com
     ''', options
       .should.equal '<div><p><a href="http://example.com">foo<strong>bar</strong>baz</a><br><a href="http://example.com">foo<strong>bar</strong>baz</a><br><a href="http://example.com">Example</a></p></div>'
+
+describe 'footnotes', ->
+
+  it 'should be compiled', ->
+    React.renderToStaticMarkup md2react '''
+    a[^foo]a[^foo]b[^bar]
+    [^foo]: description1
+    [^bar]: description2
+    ''', options
+      .should.equal '<div><p>a<sup id="fnref1"><a href="#fn1" title="description1">1</a></sup>a<sup id="fnref1"><a href="#fn1" title="description1">1</a></sup>b<sup id="fnref2"><a href="#fn2" title="description2">2</a></sup></p><div class="footnotes"><hr><ol><li id="fn1"><p>description1 <a href="#fnref1">↩</a></p></li><li id="fn2"><p>description2 <a href="#fnref2">↩</a></p></li></ol></div></div>'
+
+  it 'should be compiled when node has children', ->
+    React.renderToStaticMarkup md2react '''
+    a[^foo]a[^foo]b[^bar]
+    [^foo]: description**1**
+    [^bar]: description[2](http://example.com)
+    ''', options
+      .should.equal '<div><p>a<sup id="fnref1"><a href="#fn1" title="description**1**">1</a></sup>a<sup id="fnref1"><a href="#fn1" title="description**1**">1</a></sup>b<sup id="fnref2"><a href="#fn2" title="...">2</a></sup></p><div class="footnotes"><hr><ol><li id="fn1"><p>description**1** <a href="#fnref1">↩</a></p></li><li id="fn2"><p>description<a href="http://example.com">2</a> <a href="#fnref2">↩</a></p></li></ol></div></div>'
 
 describe 'table', ->
 
